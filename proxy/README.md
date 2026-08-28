@@ -66,8 +66,16 @@ gcloud services enable run.googleapis.com \
 The bearer token is the only thing protecting the service. Generate it; do not choose it, and
 do not commit it.
 
-**Use 16 bytes, not 32.** The watch's text picker accepts 31 characters, and 32 random bytes
-base64url-encode to 43, which cannot be entered. 16 bytes give a 22-character token.
+**Use 16 bytes unless you know your watch takes more.** The watch's text picker caps entry at a
+length the *device* chooses, and it is not one number — measured at **31 characters on a fēnix 7
+and 256 on a fēnix 8**. 32 random bytes base64url-encode to 43, which a fēnix 7 cannot accept;
+16 bytes give a 22-character token, which every watch can.
+
+If the only watch you will ever set this up from has a roomy picker, use 32 bytes — it is
+strictly better and costs nothing. Just know the trade: **the token has to be typed on every
+watch that uses the proxy**, so a 43-character one locks out any watch with a 31-character
+picker, and the only symptom there is a 401. There is no way to find a device's cap except to
+try it. When in doubt, 16 bytes.
 
 **Write the token to a file with `WriteAllText`, not through a pipe.** Piping appends a line
 ending — CRLF on Windows — and the stored secret then fails every comparison with a 401 that
@@ -123,10 +131,11 @@ gcloud secrets add-iam-policy-binding pocketcasts-proxy-token \
 
 ### 2. Deploy
 
-**Name the service `pc`.** The watch's text picker accepts 31 characters, and the service name
-is the only part of a Cloud Run hostname you control. On Cloud Run's classic URL
+**Name the service `pc`.** The watch's text picker can cap entry at as few as 31 characters (see
+[Mint a token](#1-mint-a-token) — it is device-dependent), and the service name is the only part
+of a Cloud Run hostname you control. On Cloud Run's classic URL
 (`<service>-<hash>-<regioncode>.a.run.app`) the tail after the name is a fixed 24 characters,
-so the name must be 7 characters or fewer:
+so to fit in 31 the name must be 7 characters or fewer:
 
 ```
 pocketcasts-speed-a1b2c3d4e5-wl.a.run.app     41   too long
@@ -180,14 +189,21 @@ when Cloud Run allocates CPU.
 ```powershell
 $URL = gcloud run services describe pc --region $REGION --format "value(status.url)"
 $URL
-($URL -replace '^https://','').Length      # must be <= 31
+($URL -replace '^https://','').Length      # must fit your watch's picker
 ```
 
-A two-character service name on a classic `*.a.run.app` URL gives about 26.
+You type the address **without** `https://` — the watch assumes it — so this is the number that
+has to fit. A two-character service name on a classic `*.a.run.app` URL gives about 26, which
+fits even a 31-character picker.
 
 If your project uses the newer `<service>-<hash>.<region>.run.app` form, the region is spelled
-out in full and even a two-character name lands in the mid-thirties. Map a short subdomain onto
-the service with `gcloud beta run domain-mappings create` and use that instead.
+out in full and even a two-character name lands in the mid-thirties. On a watch with a roomy
+picker (a fēnix 8 takes 256) that is simply fine, and you can stop here. On a 31-character one,
+map a short subdomain onto the service with `gcloud beta run domain-mappings create` and use
+that instead.
+
+There is no way to query a device's cap, so if you are unsure: type the address in, and if the
+picker stops accepting characters part-way through, it is too long.
 
 ### 4. Verify it works
 

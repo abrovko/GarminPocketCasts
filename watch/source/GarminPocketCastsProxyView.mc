@@ -79,15 +79,17 @@ class GarminPocketCastsProxyDelegate extends WatchUi.Menu2InputDelegate {
         // A TextPicker is PUSHED - see GarminPocketCastsLoginDelegate, which
         // explains why that is the one exception to this app's flat stack.
         // With the phone in range it opens a text field and keyboard on the
-        // PHONE, which is what makes a url and a 43-character token bearable
-        // to enter here at all: both can be pasted.
+        // PHONE, which is what makes a url and a token bearable to enter here
+        // at all: both can be pasted. Pasting does NOT get around the entry
+        // cap, which is the device's - see Proxy.setUrl().
         if (id.equals(GarminPocketCastsProxyView.SERVER_ID)) {
             if (WatchUi has :TextPicker) {
                 // Seeded WITHOUT the assumed https:// - see
-                // Proxy.getUrlForEntry(). The picker caps entry at 31
-                // characters, so seeding with the scheme would spend eight of
-                // them before the user touched anything and make a url that
-                // fitted once impossible to edit.
+                // Proxy.getUrlForEntry(). The picker's entry cap is the
+                // device's own and can be as low as 31 characters, so seeding
+                // with the scheme would spend eight of them before the user
+                // touched anything and make a url that fitted once impossible
+                // to edit.
                 WatchUi.pushView(
                     new WatchUi.TextPicker(Proxy.getUrlForEntry()),
                     new GarminPocketCastsProxyTextDelegate(item, false),

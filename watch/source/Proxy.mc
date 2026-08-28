@@ -43,8 +43,9 @@ module Proxy {
     // the measurement. Garmin draws the settings UI from an app's store
     // listing rather than from the .prg, so nothing appears on the phone until
     // this app is published. readProperty() then simply answers null and the
-    // TextPicker rows are the only way in, which is why the 31-character cap
-    // they carry still shapes everything around them.
+    // TextPicker rows are the only way in, which is why the device-dependent
+    // entry cap they carry - as low as 31 characters, see setUrl() - still
+    // shapes everything around them.
     const URL_PROP = "proxyServerProp";
     const TOKEN_PROP = "proxyTokenProp";
     const URL_SEEN_KEY = "pxUrlSeen";
@@ -82,15 +83,21 @@ module Proxy {
     // Normalise what was typed into a url we can actually request.
     //
     // THE SCHEME IS OPTIONAL, and that is not a convenience - it is what makes
-    // the setting enterable at all. WatchUi.TextPicker caps entry at 31
-    // characters on this hardware, and its constructor takes an initial string
-    // and nothing else: there is no length parameter to raise. "https://" is
-    // eight of those characters, more than a quarter of the budget, spent on
-    // something that is the same every time. So a bare host is accepted and
-    // https is assumed, which leaves 31 for the address itself.
+    // the setting enterable at all on the narrow devices. WatchUi.TextPicker
+    // caps entry at a length the DEVICE picks, and its constructor takes an
+    // initial string and nothing else: there is no length parameter to raise
+    // and no accessor to ask with. Measured: 31 characters on a fenix 7, 256
+    // on a fenix 8. "https://" is eight characters, more than a quarter of the
+    // budget on the narrow end, spent on something that is the same every
+    // time. So a bare host is accepted and https is assumed, which leaves the
+    // whole budget for the address itself.
     //
-    // An explicit scheme is still honoured when there is room for it, because
-    // a proxy on the local network is plain http and has a short host anyway.
+    // Nothing here enforces a length in either direction - whatever the picker
+    // hands back is stored verbatim. A wide picker simply means the user may
+    // type more; it does not mean this code should expect them to.
+    //
+    // An explicit scheme is still honoured, because a proxy on the local
+    // network is plain http and has a short host anyway.
     //
     // Trailing slashes come off here too, once, rather than being worked
     // around at every call site that appends a path.
@@ -129,9 +136,10 @@ module Proxy {
     // What to seed the TextPicker with when the row is opened again.
     //
     // NOT getUrl(). Seeding with the stored url would hand back the "https://"
-    // that setUrl() just added, spending eight of the picker's 31 characters
-    // before the user has typed anything - so a url that fitted when it was
-    // entered could not be edited afterwards. The default scheme comes off
+    // that setUrl() just added, spending eight of the picker's characters
+    // before the user has typed anything - so on a device with a 31-character
+    // picker a url that fitted when it was entered could not be edited
+    // afterwards. Free on a device with room. The default scheme comes off
     // again here; an explicit http:// stays, because dropping it would
     // silently promote a local proxy to https on the next edit.
     function getUrlForEntry() as String {

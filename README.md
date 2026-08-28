@@ -83,8 +83,15 @@ chosen speed (1.0×, 1.25×, 1.5×, 1.75× or 2.0×) and quality (64k/96k mono o
 | Playback | nothing; it is all on the watch |
 
 Entering the proxy address and token needs the phone in range too — the text picker opens a
-keyboard on the phone, and it accepts 31 characters, which is why the setup instructions ask
-for a short hostname.
+keyboard on the phone. How much it accepts is up to the watch: a fēnix 7 stops at 31
+characters, a fēnix 8 takes 256. The setup instructions ask for a short hostname and a
+22-character token so that they fit either; if your watch has the roomier picker you are free
+to use longer ones, bearing in mind that every watch you set the proxy up on has to be able to
+type the same token.
+
+The address is entered without `https://` — the watch assumes it — so those eight characters
+never count against the limit. An explicit `http://` or `https://` is accepted too if you
+prefer to type it.
 
 ## Getting it onto a watch
 

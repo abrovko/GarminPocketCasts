@@ -632,5 +632,16 @@ try {
 
 Write-Host ''
 Write-Host "Released $tag - $built device build(s), stamp $ver" -ForegroundColor Green
-if ($Draft) { Write-Host 'Draft: review and publish it on GitHub.' -ForegroundColor Cyan }
+if ($Draft) {
+    Write-Host 'Draft: review and publish it on GitHub.' -ForegroundColor Cyan
+    # The notes are composed before the release exists, so the device table
+    # links to releases/download/<tag>/<asset>. GitHub does not create the tag
+    # until the draft is published, and until then it serves the assets under a
+    # placeholder - releases/download/untagged-<hash>/<asset>. So every link in
+    # the table 404s while the draft is being reviewed and starts working the
+    # moment it goes live. Nothing to fix; it just looks broken.
+    Write-Dim "Links in the device table 404 until you publish - GitHub creates the tag"
+    Write-Dim "$tag then. While it is a draft the assets sit under an 'untagged-<hash>' url."
+    Write-Dim "Publish under $tag exactly, or those links point at a tag that never exists."
+}
 Write-Dim "Local copy: $OutDir"
