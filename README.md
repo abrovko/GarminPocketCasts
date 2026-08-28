@@ -92,13 +92,25 @@ Two ways in, and they are not equally safe.
 
 - **Build it yourself** — [Build](#build), then [Deploy to a watch](#deploy-to-a-watch). It
   needs the free Connect IQ SDK and a developer key, and takes a few minutes.
-- **Download a prebuilt `.prg`** from [Releases](../../releases). One file per device, each
-  labelled with the watches it covers, plus a table in the release notes mapping Connect IQ
-  device ids to real model names.
+- **Download a prebuilt `.zip`** from [Releases](../../releases). One archive per device,
+  each labelled with the watches it covers, plus a table in the release notes mapping
+  Connect IQ device ids to real model names. Inside is a `GARMIN` folder you drag onto the
+  watch as-is:
+
+  ```
+  GARMIN/APPS/GarminPocketCasts.prg
+  GARMIN/APPS/LOGS/GarminPocketCasts.TXT         (empty — see below)
+  GARMIN/Debug/GarminPocketCasts.prg.debug.xml
+  ```
+
+  The empty `.TXT` is deliberate and worth keeping: the watch only writes the app's log if
+  that file already exists, so without it there is nothing to attach to a bug report. The
+  `.prg.debug.xml` is what turns a crash log into readable line numbers, and only the copy
+  built alongside that exact binary will do it.
 
 ### Sideloading is at your own risk
 
-The prebuilt files are built on a personal machine and signed with a personal developer key.
+The prebuilt archives are built on a personal machine and signed with a personal developer key.
 Sideloading bypasses the Connect IQ store, so **nothing in a release has been reviewed by
 Garmin**, and this app handles your Pocket Casts email and password.
 

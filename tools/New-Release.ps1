@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Cut a GitHub release: build a signed .prg for every product in the
-    manifest, package them, and publish the lot as release assets.
+    manifest, package each as a ready-to-copy watch folder, and publish the
+    lot as release assets.
 
 .DESCRIPTION
     A GitHub release is a tag plus a set of files; nothing builds those files
@@ -10,27 +11,36 @@
     device definitions, and the developer key, which is per-developer, lives
     outside the repo and must never reach a public runner.
 
-    What someone sideloading this app needs is a device-specific .prg for
-    GARMIN/APPS/. The .iq that `monkeyc -e` produces is the *store* upload
-    bundle and is useless to them, so it is built only on request
-    (-IncludeIq).
+    What someone sideloading this app needs is not one file but a small tree,
+    so each product ships as an archive of exactly that tree:
+
+        GARMIN/APPS/GarminPocketCasts.prg              the app
+        GARMIN/APPS/LOGS/GarminPocketCasts.TXT         empty, and required
+        GARMIN/Debug/GarminPocketCasts.prg.debug.xml   symbols
+
+    Unzip, drag GARMIN onto the watch, merge. That replaces a list of
+    instructions with a layout, and the empty log file is why it is worth
+    doing: the watch discards every System.println unless that file already
+    exists, and nobody talked through creating a zero-byte file with an exact
+    name over MTP is likely to end up with one.
+
+    The .iq that `monkeyc -e` produces is the *store* upload bundle and is
+    useless to a sideloader, so it is built only on request (-IncludeIq).
 
     Assets published:
-        GarminPocketCasts-<version>-<device>.prg      one loose file per product
-        GarminPocketCasts-<version>-symbols.zip       every .prg.debug.xml
+        GarminPocketCasts-<version>-<device>.zip      one archive per product
         SHA256SUMS.txt
 
-    Sideloading is one file onto one watch, so every .prg goes up loose rather
-    than inside an archive of 57 of them. Each is labelled with the SDK's own
-    displayName for that product ("fenix847mm" is a fēnix 8 47mm AND a 51mm AND
-    a tactix 8 AND a quatix 8), and the notes carry the same mapping as a table,
-    because a device id is not something anyone knows about their own watch.
+    Still one asset per watch and no all-devices bundle: sideloading is one
+    download onto one watch. Each is labelled with the SDK's own displayName for
+    that product ("fenix847mm" is a fēnix 8 47mm AND a 51mm AND a tactix 8 AND a
+    quatix 8), and the notes carry the same mapping as a table, because a device
+    id is not something anyone knows about their own watch.
 
-    The symbols ship deliberately: a crash log off someone else's watch can
-    only be resolved against the .prg.debug.xml matching the binary that
-    produced it, and that pairing is unrecoverable once the build is gone.
-    They stay a single archive - a developer artifact next to 57 files people
-    actually came for.
+    There is no separate symbols archive. A crash log resolves only against the
+    .prg.debug.xml matching the binary that produced it, so the symbols ride
+    inside the archive for that device - the one pairing that was ever useful -
+    instead of in a bundle that has to be matched up by hand later.
 
     BuildInfo.STAMP is rewritten to the version for the duration of the build
     and restored afterwards, so the watch's Settings row reads "Build 1.0.0"
@@ -252,6 +262,54 @@ function Set-BuildStamp ($value) {
     Set-Content -LiteralPath $BuildInfoPath -Value $next -NoNewline -Encoding utf8
 }
 
+# ------------------------------------------------------------- package -------
+
+# One archive per device, holding the exact tree the watch expects:
+#
+#   GARMIN/APPS/<App>.prg                 the app - APPS, never APPS/MEDIA
+#   GARMIN/APPS/LOGS/<App>.TXT            empty, and it has to exist or every
+#                                         System.println is silently discarded
+#   GARMIN/Debug/<App>.prg.debug.xml      symbols for this exact binary
+#
+# The empty log file is the reason this is an archive rather than three loose
+# assets: it cannot be published as a file anyone would think to keep, and a
+# user told to "create an empty file with exactly this name" mostly will not.
+# Shipping the layout removes the whole instruction.
+#
+# Copy by name into a clean staging tree - never archive the directory monkeyc
+# built in. It writes gen\, mir\ and a settings .json beside its output, and an
+# earlier version of this script shipped every Rez.mcgen in the build.
+function New-DeviceArchive ($id, $prg) {
+    $stage = Join-Path $BuildDir "$id\stage"
+    $apps  = Join-Path $stage 'GARMIN\APPS'
+    $logs  = Join-Path $apps  'LOGS'
+    $dbg   = Join-Path $stage 'GARMIN\Debug'
+    New-Item -ItemType Directory -Force -Path $logs, $dbg | Out-Null
+
+    Copy-Item -LiteralPath $prg -Destination (Join-Path $apps "$AppName.prg")
+
+    # Absent only if monkeyc changes where it writes symbols; the zip is still
+    # usable without them, so this warns rather than aborting the release.
+    $sym = "$prg.debug.xml"
+    if (Test-Path -LiteralPath $sym) {
+        Copy-Item -LiteralPath $sym -Destination (Join-Path $dbg "$AppName.prg.debug.xml")
+    } else {
+        Write-Warn "no symbols for $id - crash logs from it will not resolve"
+    }
+
+    # -ItemType File with no -Value is a genuine zero-byte file, and a zero-byte
+    # entry survives the archive (verified: it unpacks at 0 bytes, not absent).
+    $stub = Join-Path $logs "$AppName.TXT"
+    if (-not (Test-Path -LiteralPath $stub)) { New-Item -ItemType File -Path $stub | Out-Null }
+
+    # Pointing -Path at the directory itself is what puts GARMIN/ at the root of
+    # the archive, so it drops straight onto the watch. A trailing \* would
+    # scatter APPS/ and Debug/ into the root instead.
+    $zip = Join-Path $ZipDir "$AppName-$ver-$id.zip"
+    Compress-Archive -Path (Join-Path $stage 'GARMIN') -DestinationPath $zip -CompressionLevel Optimal
+    return $zip
+}
+
 # --------------------------------------------------------------- notes -------
 
 # Asset links have to be written before the release exists, so the download url
@@ -353,19 +411,29 @@ No warranty of any kind - see the $licenceLink. Install these at your own risk.
 
 Sideloading, not the Connect IQ store - this app is not published there.
 
-1. Find your watch in the table below and download **one** ``.prg``. Each build targets
+1. Find your watch in the table below and download **one** ``.zip``. Each build targets
    one device; a file for another watch will not work.
-2. Connect the watch by USB and copy it to **GARMIN/APPS/** - not ``APPS/MEDIA``, which
-   the watch will not let you create.
-3. Unplug and **restart the watch by hand**. It does not restart on unplug, and the app
+2. Unzip it. Inside is a ``GARMIN`` folder already laid out the way the watch expects -
+   nothing needs renaming or moving.
+3. Connect the watch by USB and copy that ``GARMIN`` folder onto the watch, merging it
+   with the ``GARMIN`` folder already there when Windows asks.
+4. Unplug and **restart the watch by hand**. It does not restart on unplug, and the app
    will not appear until it does.
-4. It is an audio content provider, so it appears under **Music -> Music Providers**,
+5. It is an audio content provider, so it appears under **Music -> Music Providers**,
    not in the app list.
 
 Confirm what is running from the last row of Settings - it should read ``Build $ver``.
 
-``$AppName-$ver-symbols.zip`` holds the ``.prg.debug.xml`` for every device. It is only
-needed to resolve a crash log, and it must match the exact binary that crashed.
+The archive holds three files. Two of them look skippable and are worth keeping:
+
+| In the archive | What it is |
+| --- | --- |
+| ``GARMIN/APPS/$AppName.prg`` | the app itself |
+| ``GARMIN/APPS/LOGS/$AppName.TXT`` | **empty on purpose.** The watch only writes the app's log if this file already exists, and it is easy to delete by mistake because it looks like nothing. Replacing it means making an empty file with exactly that name and copying it back |
+| ``GARMIN/Debug/$AppName.prg.debug.xml`` | symbols. A crash log resolves only against the exact binary that produced it, so this is the copy that matches |
+
+Both are inert unless something goes wrong, and together they are the difference between
+a bug report that can be read and one that cannot.
 
 Built from ``$($sha.Substring(0, [Math]::Min(8, $sha.Length)))`` with $($devices.Count) device target(s).
 "@
@@ -400,9 +468,15 @@ if (-not $BuildOnly) {
 }
 
 if (Test-Path $OutDir) { Remove-Item -Recurse -Force $OutDir }
-$prgDir = Join-Path $OutDir 'prg'
-$symDir = Join-Path $OutDir 'symbols'
-New-Item -ItemType Directory -Force -Path $prgDir, $symDir | Out-Null
+
+# Two directories, and keeping them apart is what stops the build's litter
+# reaching a user. monkeyc writes gen\, mir\ and a settings .json beside its
+# output file, so nothing may be archived from where it builds - $BuildDir is
+# scratch, and the staging tree under it receives only files copied into it by
+# name. $ZipDir holds what actually goes up.
+$BuildDir = Join-Path $OutDir 'build'
+$ZipDir   = Join-Path $OutDir 'zip'
+New-Item -ItemType Directory -Force -Path $BuildDir, $ZipDir | Out-Null
 
 $originalBuildInfo = Get-Content -LiteralPath $BuildInfoPath -Raw
 $warnings = @()
@@ -418,10 +492,14 @@ try {
     $n  = 0
     foreach ($id in $ids) {
         $n++
-        # The version is in the filename because a .prg tells you nothing about
-        # itself once it is sitting in someone's Downloads folder, and two of
-        # them look identical.
-        $prg = Join-Path $prgDir "$AppName-$ver-$id.prg"
+        # Inside the zip the .prg carries its plain name, because the watch
+        # keys a lot off that filename - the log file at GARMIN/APPS/LOGS/ must
+        # match it or output is silently discarded, and app Storage is keyed by
+        # it too. The version and device live on the *archive* instead, which is
+        # what sits in someone's Downloads folder looking like every other one.
+        $devDir = Join-Path $BuildDir $id
+        New-Item -ItemType Directory -Force -Path $devDir | Out-Null
+        $prg = Join-Path $devDir "$AppName.prg"
         Write-Host ("    [{0,3}/{1}] {2,-24}" -f $n, $ids.Count, $id) -NoNewline
 
         $out = & $mc.Path -o $prg -f $JunglePath -y $key -d $id -r -w -l 3 2>&1
@@ -431,24 +509,23 @@ try {
             throw "monkeyc failed for $id (exit $LASTEXITCODE)"
         }
 
+        $zip = New-DeviceArchive $id $prg
+
         $warn = @($out | Where-Object { "$_" -match 'WARNING' })
         if ($warn.Count -gt 0) {
             $warnings += ($warn | ForEach-Object { "${id}: $_" })
-            Write-Host ("{0,9:N0} bytes  {1} warning(s)" -f (Get-Item $prg).Length, $warn.Count) `
+            Write-Host ("{0,9:N0} prg {1,9:N0} zip  {2} warning(s)" -f `
+                        (Get-Item $prg).Length, (Get-Item $zip).Length, $warn.Count) `
                        -ForegroundColor Yellow
         } else {
-            Write-Host ("{0,9:N0} bytes" -f (Get-Item $prg).Length) -ForegroundColor DarkGray
+            Write-Host ("{0,9:N0} prg {1,9:N0} zip" -f `
+                        (Get-Item $prg).Length, (Get-Item $zip).Length) -ForegroundColor DarkGray
         }
-
-        # monkeyc writes the symbols beside the .prg; they travel as their own
-        # asset so the download a user actually needs stays small.
-        $sym = "$prg.debug.xml"
-        if (Test-Path $sym) { Move-Item -Force $sym (Join-Path $symDir (Split-Path -Leaf $sym)) }
 
         $devices.Add([pscustomobject]@{
             Id   = $id
             Name = (Get-DeviceDisplayName $id)
-            File = $prg
+            File = $zip
         })
         $built++
     }
@@ -487,20 +564,16 @@ if ($warnings.Count -gt 0) {
 
 Write-Step 'Packaging'
 
-# Every .prg goes up loose. Sideloading is one file onto one watch, so a zip of
-# 57 of them is 3 MB to download and a folder to search for a name you have to
-# know already - where a loose asset is labelled with the watch it is for.
+# One archive per device, each labelled with the watch it is for. Still one
+# asset per watch and no all-devices bundle: sideloading is one download onto
+# one watch, so an archive of all 57 would be megabytes to fetch and a folder to
+# search for a name you would have to know already.
 $assets = @($devices | ForEach-Object { $_.File })
 
-# The symbols stay a single archive: they are a developer artifact, only useful
-# for resolving someone else's crash log, and doubling the asset list to put
-# them beside the file they belong to would bury the thing people came for.
-# Glob the extension rather than the directory - monkeyc writes its gen/
-# intermediates beside the output file, and a whole-directory archive ships
-# every Rez.mcgen and .mbc in the build to anyone who downloads the release.
-$symZip = Join-Path $OutDir "$AppName-$ver-symbols.zip"
-Compress-Archive -Path (Join-Path $symDir '*.xml') -DestinationPath $symZip -CompressionLevel Optimal
-$assets += $symZip
+# There is no separate symbols archive. Each device zip carries the
+# .prg.debug.xml for its own binary, which is the only pairing that resolves a
+# crash log anyway - so the symbols travel with the thing they describe instead
+# of in a bundle that has to be matched up by hand after the build is gone.
 
 if ($IncludeIq) { $assets += (Join-Path $OutDir "$AppName-$ver.iq") }
 
@@ -512,7 +585,6 @@ $assets += $sums
 
 $totalBytes = ($assets | ForEach-Object { (Get-Item $_).Length } | Measure-Object -Sum).Sum
 Write-Ok ("{0} asset(s), {1:N0} bytes" -f $assets.Count, $totalBytes)
-Write-Dim ("{0,10:N0}  {1}" -f (Get-Item $symZip).Length, (Split-Path -Leaf $symZip))
 Write-Dim ("{0,10:N0}  {1}" -f (Get-Item $sums).Length, (Split-Path -Leaf $sums))
 
 $notesPath = Join-Path $OutDir 'RELEASE_NOTES.md'
