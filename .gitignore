@@ -1,0 +1,13 @@
+# Build output and device log pulls. Written without a leading path so they
+# match at any depth - the Connect IQ project lives in watch/, and both the
+# VS Code Monkey C extension and tools\Deploy-Watch.ps1 write watch\bin there.
+bin/
+Release/
+logs/
+
+.vscode/
+
+# Never let a credentials file into a public repo.
+tests/api/.env
+tests/api/__pycache__/
+tests/api/.pytest_cache/

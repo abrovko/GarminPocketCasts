@@ -1,0 +1,85 @@
+project.manifest = manifest.xml
+
+# Per-device launcher icons.
+#
+# The artwork lives in exactly one place - resources/drawables/launcher_icon.svg,
+# whose intrinsic size is 40x40. Devices whose launcher is a different size
+# pick up a resources-icon<size>/ override that points at that same SVG and sets
+# scaleX/scaleY, so the icon is rasterised at the device's launcher size instead
+# of being scaled by the compiler (which warns on every build).
+#
+# The launcher size is not something to guess: it is launcherIcon.width in
+# %APPDATA%\Garmin\ConnectIQ\Devices\<id>\compiler.json. This block is GENERATED -
+# after adding or removing an <iq:product>, run tools\Sync-IconTargets.ps1 rather
+# than editing it by hand, or the export build starts warning again.
+
+# 54x54
+fr165m.resourcePath = $(fr165m.resourcePath);resources-icon54
+fr170m.resourcePath = $(fr170m.resourcePath);resources-icon54
+fr57042mm.resourcePath = $(fr57042mm.resourcePath);resources-icon54
+venu441mm.resourcePath = $(venu441mm.resourcePath);resources-icon54
+vivoactive6.resourcePath = $(vivoactive6.resourcePath);resources-icon54
+
+# 56x56
+approachs50.resourcePath = $(approachs50.resourcePath);resources-icon56
+vivoactive5.resourcePath = $(vivoactive5.resourcePath);resources-icon56
+
+# 60x60
+approachs7042mm.resourcePath = $(approachs7042mm.resourcePath);resources-icon60
+d2mach1.resourcePath = $(d2mach1.resourcePath);resources-icon60
+descentmk343mm.resourcePath = $(descentmk343mm.resourcePath);resources-icon60
+descentmk351mm.resourcePath = $(descentmk351mm.resourcePath);resources-icon60
+epix2.resourcePath = $(epix2.resourcePath);resources-icon60
+epix2pro42mm.resourcePath = $(epix2pro42mm.resourcePath);resources-icon60
+epix2pro47mm.resourcePath = $(epix2pro47mm.resourcePath);resources-icon60
+epix2pro51mm.resourcePath = $(epix2pro51mm.resourcePath);resources-icon60
+fenix843mm.resourcePath = $(fenix843mm.resourcePath);resources-icon60
+fenix943mm.resourcePath = $(fenix943mm.resourcePath);resources-icon60
+fenix9pro43mm.resourcePath = $(fenix9pro43mm.resourcePath);resources-icon60
+fenixe.resourcePath = $(fenixe.resourcePath);resources-icon60
+fr265.resourcePath = $(fr265.resourcePath);resources-icon60
+fr265s.resourcePath = $(fr265s.resourcePath);resources-icon60
+marq2.resourcePath = $(marq2.resourcePath);resources-icon60
+marq2aviator.resourcePath = $(marq2aviator.resourcePath);resources-icon60
+
+# 61x61
+venu2s.resourcePath = $(venu2s.resourcePath);resources-icon61
+
+# 65x65
+d2mach2.resourcePath = $(d2mach2.resourcePath);resources-icon65
+d2mach2pro.resourcePath = $(d2mach2pro.resourcePath);resources-icon65
+fenix847mm.resourcePath = $(fenix847mm.resourcePath);resources-icon65
+fenix8pro47mm.resourcePath = $(fenix8pro47mm.resourcePath);resources-icon65
+fenix947mm.resourcePath = $(fenix947mm.resourcePath);resources-icon65
+fenix9pro47mm.resourcePath = $(fenix9pro47mm.resourcePath);resources-icon65
+fenix9pro51mm.resourcePath = $(fenix9pro51mm.resourcePath);resources-icon65
+fr57047mm.resourcePath = $(fr57047mm.resourcePath);resources-icon65
+fr965.resourcePath = $(fr965.resourcePath);resources-icon65
+fr970.resourcePath = $(fr970.resourcePath);resources-icon65
+venu445mm.resourcePath = $(venu445mm.resourcePath);resources-icon65
+venux1.resourcePath = $(venux1.resourcePath);resources-icon65
+
+# 70x70
+approachs7047mm.resourcePath = $(approachs7047mm.resourcePath);resources-icon70
+d2airx10.resourcePath = $(d2airx10.resourcePath);resources-icon70
+venu2.resourcePath = $(venu2.resourcePath);resources-icon70
+venu2plus.resourcePath = $(venu2plus.resourcePath);resources-icon70
+venu3.resourcePath = $(venu3.resourcePath);resources-icon70
+venu3s.resourcePath = $(venu3s.resourcePath);resources-icon70
+
+# 40x40 devices use the base resources/ path unchanged:
+#   enduro3
+#   fenix7
+#   fenix7pro
+#   fenix7s
+#   fenix7spro
+#   fenix7x
+#   fenix7xpro
+#   fenix8solar47mm
+#   fenix8solar51mm
+#   fenix9prosolar47mm
+#   fenix9prosolar51mm
+#   fr255m
+#   fr255sm
+#   fr955
+#   venusq2m

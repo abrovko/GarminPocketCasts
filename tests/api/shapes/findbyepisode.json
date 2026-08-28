@@ -1,0 +1,35 @@
+{
+  "episode_count": "int",
+  "episode_frequency": "str",
+  "estimated_next_episode_at": "null",
+  "has_more_episodes": "bool",
+  "has_seasons": "bool",
+  "podcast": {
+    "audio": "bool",
+    "author": "str",
+    "category": "str",
+    "description": "str",
+    "episodes": [
+      {
+        "duration": "int",
+        "file_size": "int",
+        "file_type": "str",
+        "number": "int",
+        "published": "str",
+        "season": "int",
+        "slug": "str",
+        "title": "str",
+        "type": "str",
+        "url": "str",
+        "uuid": "str"
+      }
+    ],
+    "feed_url": "str",
+    "show_type": "str",
+    "slug": "str",
+    "title": "str",
+    "url": "str",
+    "uuid": "str"
+  },
+  "season_count": "int"
+}

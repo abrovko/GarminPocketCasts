@@ -1,0 +1,58 @@
+<strings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
+    <string id="AppName">Pocket Casts (Unofficial)</string>
+
+    <string id="playbackMenuTitle">Play</string>
+    <string id="toggleOn">On</string>
+    <string id="toggleOff">Off</string>
+    <string id="nothingSynced">Nothing synced</string>
+    <string id="noEpisodes">No episodes</string>
+    <string id="noPlaylists">No playlists</string>
+    <string id="playlistsMenuTitle">Playlists</string>
+    <string id="refreshing">Loading playlists</string>
+    <string id="refreshPlaylists">Refresh playlists</string>
+    <string id="downloadNow">Download now</string>
+    <string id="syncFailed">Sync failed</string>
+    <string id="buildLabel">Build</string>
+    <string id="deleteEpisodes">Delete episodes</string>
+    <string id="clearDownloads">Reset everything</string>
+    <string id="settings">Settings</string>
+    <string id="selectPlaylists">Select playlists</string>
+    <string id="upToDate">Up to date</string>
+    <string id="getEpisodes">Get new episodes</string>
+
+    <!-- Sign-in. The account menu is reached from Settings, and landed on
+         automatically whenever the watch has no working credentials. -->
+    <string id="account">Account</string>
+    <string id="email">Email</string>
+    <string id="password">Password</string>
+    <string id="signIn">Sign in</string>
+    <string id="signOut">Sign out</string>
+    <string id="notSet">Not set</string>
+    <string id="notSignedIn">Not signed in</string>
+    <string id="enterBoth">Enter both first</string>
+
+    <!-- Shown on the system's sync screen when more than one episode is
+         queued, as "3 episodes". A single episode shows its own title. -->
+    <string id="syncEpisodes">episodes</string>
+
+    <!-- Playback speed. The watch has no speed control of its own, so this
+         configures the proxy that sends the audio down already sped up.
+         Reached from Settings; see Proxy.mc. -->
+    <string id="playbackSpeed">Playback speed</string>
+    <string id="proxyServer">Server</string>
+    <string id="proxyToken">Token</string>
+    <string id="proxySpeed">Speed</string>
+    <string id="proxyQuality">Quality</string>
+    <string id="proxyOff">Off</string>
+    <!-- Channel count, as the tail of "64 kbps mono". -->
+    <string id="qualityMono">mono</string>
+    <string id="qualityStereo">stereo</string>
+
+    <!-- App settings, shown in Garmin Connect Mobile rather than on the watch.
+         The watch's own text picker stops at 31 characters, which neither a
+         proxy address nor a token fits into. -->
+    <string id="settingServer">Playback speed proxy</string>
+    <string id="settingServerPrompt">Address of your transcoding proxy, including https://</string>
+    <string id="settingToken">Proxy token</string>
+    <string id="settingTokenPrompt">The bearer token you configured on the proxy</string>
+</strings>

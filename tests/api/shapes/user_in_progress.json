@@ -1,0 +1,28 @@
+{
+  "episodes": [
+    {
+      "alternateEnclosures": [],
+      "author": "str",
+      "bookmarks": [],
+      "duration": "int",
+      "episodeNumber": "int",
+      "episodeSeason": "int",
+      "episodeType": "str",
+      "fileType": "str",
+      "isDeleted": "bool",
+      "playedUpTo": "int",
+      "playingStatus": "int",
+      "podcastSlug": "str",
+      "podcastTitle": "str",
+      "podcastUuid": "str",
+      "published": "str",
+      "size": "str",
+      "slug": "str",
+      "starred": "bool",
+      "title": "str",
+      "url": "str",
+      "uuid": "str"
+    }
+  ],
+  "total": "int"
+}

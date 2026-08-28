@@ -1,0 +1,40 @@
+<!--
+    App settings, edited in Garmin Connect Mobile / Garmin Express.
+
+    THESE DO NOT REACH A SIDELOADED APP. Measured on a fenix 8, 2026-08-27:
+    with this file built in and the strings verified present in the shipped
+    .prg ("proxyServerProp" at offset 8725 of a 168 KB debug build), neither
+    Garmin Connect nor the Connect IQ app showed any settings page for the
+    app at all. Garmin renders the settings UI from the app's STORE LISTING,
+    not by reading the definition off the device, and a sideloaded app has no
+    listing - so there is nothing for the phone to draw.
+
+    Kept anyway, because it costs one guarded no-op property read per entry
+    point and starts working the day this app is published. Until then the
+    watch's own TextPicker rows are the only way in, and the 31-character cap
+    they carry is what makes a short hostname necessary. Do not spend another
+    cycle trying to make this appear on a sideloaded install.
+
+    Only the two long values live here. Speed and quality stay on the watch,
+    where they can be cycled in one tap with no phone in range - the split is
+    "what you paste once comes from the phone, what you change often stays on
+    the wrist", which also means neither setting has two places to edit it.
+
+    The server is type="url" rather than alphaNumeric because that is the type
+    designed to carry one, and alphaNumeric's name is ambiguous enough about
+    ':' and '/' not to be worth the risk. It wants the full address including
+    the scheme; there is no length pressure here, unlike the watch's picker.
+-->
+<settings>
+    <setting propertyKey="@Properties.proxyServerProp"
+             title="@Strings.settingServer"
+             prompt="@Strings.settingServerPrompt">
+        <settingConfig type="url" />
+    </setting>
+
+    <setting propertyKey="@Properties.proxyTokenProp"
+             title="@Strings.settingToken"
+             prompt="@Strings.settingTokenPrompt">
+        <settingConfig type="password" />
+    </setting>
+</settings>

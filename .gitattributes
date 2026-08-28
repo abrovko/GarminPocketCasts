@@ -1,0 +1,11 @@
+# Line endings are pinned here so they do not depend on each clone's
+# core.autocrlf setting. Everything text is stored with LF in the repository
+# AND checked out with LF, which is what the working tree already holds -
+# `text=auto` alone would store LF but check out CRLF on Windows, and every
+# `git add` then warns that it is about to rewrite the file.
+* text=auto eol=lf
+
+# Never normalise these, whether or not they are tracked today.
+*.png binary
+*.prg binary
+*.iq  binary

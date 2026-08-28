@@ -1,0 +1,43 @@
+{
+  "playlists": [
+    {
+      "allPodcasts": "bool",
+      "audioVideo": "int",
+      "downloaded": "bool",
+      "downloading?": "bool",
+      "episodeOrder?": [
+        "str"
+      ],
+      "episodes?": [
+        {
+          "added": "str",
+          "episode": "str",
+          "episodeSlug": "str",
+          "podcast": "str",
+          "podcastSlug": "str",
+          "published": "str",
+          "title": "str",
+          "url": "str"
+        }
+      ],
+      "filterDuration": "bool",
+      "filterHours": "int",
+      "finished": "bool",
+      "iconId": "int",
+      "isDeleted": "bool",
+      "longerThan": "int",
+      "manual": "bool",
+      "notDownloaded": "bool",
+      "originalUuid": "str",
+      "partiallyPlayed": "bool",
+      "shorterThan": "int",
+      "showArchived": "bool",
+      "sortPosition": "int",
+      "sortType": "int",
+      "starred": "bool",
+      "title": "str",
+      "unplayed": "bool",
+      "uuid": "str"
+    }
+  ]
+}
