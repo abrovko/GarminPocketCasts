@@ -27,20 +27,12 @@ class GarminPocketCastsConfigurePlaybackDelegate extends WatchUi.Menu2InputDeleg
         // redraw itself, so backing onto it after a sync would show the
         // episodes as they stood before the download.
         if (id.equals(GarminPocketCastsConfigurePlaybackView.GET_ID)) {
-            WatchUi.switchToView(
-                new GarminPocketCastsRefreshView(true),
-                new GarminPocketCastsRefreshDelegate(),
-                WatchUi.SLIDE_LEFT
-            );
+            Nav.refresh(true, WatchUi.SLIDE_LEFT);
             return;
         }
 
         if (id.equals(GarminPocketCastsConfigurePlaybackView.SETTINGS_ID)) {
-            WatchUi.switchToView(
-                new GarminPocketCastsSettingsView(),
-                new GarminPocketCastsSettingsDelegate(),
-                WatchUi.SLIDE_LEFT
-            );
+            Nav.settings(WatchUi.SLIDE_LEFT);
             return;
         }
 

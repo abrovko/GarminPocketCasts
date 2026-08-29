@@ -46,12 +46,4 @@
     <!-- Channel count, as the tail of "64 kbps mono". -->
     <string id="qualityMono">mono</string>
     <string id="qualityStereo">stereo</string>
-
-    <!-- App settings, shown in Garmin Connect Mobile rather than on the watch.
-         The watch's own text picker stops at 31 characters, which neither a
-         proxy address nor a token fits into. -->
-    <string id="settingServer">Playback speed proxy</string>
-    <string id="settingServerPrompt">Address of your transcoding proxy, including https://</string>
-    <string id="settingToken">Proxy token</string>
-    <string id="settingTokenPrompt">The bearer token you configured on the proxy</string>
 </strings>

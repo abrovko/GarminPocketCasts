@@ -41,13 +41,11 @@ module Auth {
     // --- credentials ---
 
     function getEmail() as String {
-        var stored = Storage.getValue(EMAIL_KEY);
-        return stored instanceof String ? stored : "";
+        return Store.getString(EMAIL_KEY, "");
     }
 
     function getPassword() as String {
-        var stored = Storage.getValue(PASSWORD_KEY);
-        return stored instanceof String ? stored : "";
+        return Store.getString(PASSWORD_KEY, "");
     }
 
     // Both halves, or this watch is not signed in. A half-filled account is
@@ -95,8 +93,7 @@ module Auth {
     // --- token ---
 
     function getToken() as String? {
-        var stored = Storage.getValue(TOKEN_KEY);
-        return stored instanceof String ? stored : null;
+        return Store.getStringOrNull(TOKEN_KEY);
     }
 
     function setToken(token as String) as Void {

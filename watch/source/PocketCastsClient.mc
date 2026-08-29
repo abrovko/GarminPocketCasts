@@ -124,12 +124,6 @@ class PocketCastsClient {
     // and a playlist gets one record and one download rather than two.
     private var _seenEpisodes as Dictionary<String, Boolean> = {} as Dictionary<String, Boolean>;
 
-    // Built while walking the /user/in_progress response so the whole of it
-    // can be logged on one line. A member rather than a local because the
-    // walk is long enough that appending to a local and printing it at the
-    // bottom reads worse than this does.
-    private var _returned as String = "";
-
     // The selectable playlists, in display order: { "i" => id, "t" => title,
     // "e" => Array<String> of episode uuids }.
     private var _lists as Array<Dictionary<String, PersistableType>> =
@@ -394,12 +388,12 @@ class PocketCastsClient {
                 continue;
             }
 
-            var uuid = firstString(entry, "uuid", "uuid");
+            var uuid = getString(entry, "uuid");
             if (uuid.length() == 0) {
                 continue;
             }
 
-            var title = firstString(entry, "title", "title");
+            var title = getString(entry, "title");
             if (title.length() == 0) {
                 title = uuid;
             }
@@ -465,7 +459,7 @@ class PocketCastsClient {
     // one record and one download, while still appearing in both playlists.
     private function addEpisode(entry as Dictionary) as String? {
         var uuid = firstString(entry, "episode", "uuid");
-        var url = firstString(entry, "url", "url");
+        var url = getString(entry, "url");
         if (uuid.length() == 0 || url.length() == 0) {
             return null;
         }
@@ -477,7 +471,7 @@ class PocketCastsClient {
             return null;
         }
 
-        var title = firstString(entry, "title", "title");
+        var title = getString(entry, "title");
         if (title.length() == 0) {
             title = uuid;
         }
@@ -496,7 +490,7 @@ class PocketCastsClient {
             UNKNOWN_ARTIST,
             encodingForUrl(url, firstString(entry, "fileType", "file_type")),
             podcastUuid,
-            seconds(entry, "duration", "duration")
+            secondsOf(entry, "duration")
         ));
         _podcastOf.add(podcastUuid);
         _seenEpisodes.put(uuid, true);
@@ -564,7 +558,9 @@ class PocketCastsClient {
             if (episodes instanceof Array) {
                 var list = episodes as Array<Object?>;
                 var merged = 0;
-                _returned = "";
+                // Every uuid the server returned, built up here and printed on
+                // one line at the bottom. See the append below for why.
+                var returned = "";
 
                 // What the merge is working with, before any of it is
                 // filtered. "considered 0" on its own cannot distinguish an
@@ -581,7 +577,7 @@ class PocketCastsClient {
                         }
                         continue;
                     }
-                    var uuid = firstString(entry, "uuid", "uuid");
+                    var uuid = getString(entry, "uuid");
                     if (uuid.length() == 0) {
                         if (i < MAX_IN_PROGRESS_LOG) {
                             System.println("pc: ip[" + i + "] no uuid, keys=" + entry.keys());
@@ -596,7 +592,7 @@ class PocketCastsClient {
                     // could not distinguish an episode the server never
                     // reported from one it reported that we failed to match.
                     // This line answers that outright and costs ~170 bytes.
-                    _returned += uuid.substring(0, 8) + " ";
+                    returned += uuid.substring(0, 8) + " ";
 
                     // One compact line per entry, capped: this is the whole
                     // point of the endpoint laid out side by side, so a run
@@ -623,7 +619,7 @@ class PocketCastsClient {
                     // is exactly the one whose duration is hardest to get any
                     // other way. Nothing can leak in - applyDuration writes
                     // only where a record already exists.
-                    applyDuration(uuid, seconds(entry, "duration", "duration"));
+                    applyDuration(uuid, secondsOf(entry, "duration"));
 
                     if (!_seenEpisodes.hasKey(uuid)) {
                         continue;
@@ -641,14 +637,11 @@ class PocketCastsClient {
                 if (list.size() > MAX_IN_PROGRESS_LOG) {
                     System.println("pc: ip ... and " + (list.size() - MAX_IN_PROGRESS_LOG) + " more");
                 }
-                System.println("pc: ip all: " + _returned);
+                System.println("pc: ip all: " + returned);
                 System.println("pc: we hold: " + heldKeys());
                 System.println("pc: considered " + merged + " server position(s)");
             }
         } else if (responseCode == 200) {
-            // 200 with a body that is not a Dictionary at all - a String here
-            // means the response was not JSON, which the request explicitly
-            // asks for.
             // 200 with a body that is not a Dictionary at all - a String here
             // means the response was not JSON, which the request explicitly
             // asks for. Truncated, because the device log rotates at 5 KB and
@@ -847,16 +840,7 @@ class PocketCastsClient {
         }
 
         if (responseCode != 200) {
-            System.println("pc: update_episode failed " + responseCode);
-            if (_flushing) {
-                finish(false, describeError(responseCode));
-            } else {
-                // A refresh must not fail because reporting did - the user
-                // came here to pick episodes. The outbox is untouched, so
-                // everything is retried at the next opportunity.
-                _dirty = [] as Array<String>;
-                resolvePodcastNext();
-            }
+            reportFailed("update_episode", responseCode);
             return;
         }
 
@@ -946,19 +930,36 @@ class PocketCastsClient {
         }
 
         if (responseCode != 200) {
-            System.println("pc: up_next remove failed " + responseCode);
-            if (_flushing) {
-                finish(false, describeError(responseCode));
-            } else {
-                _removals = [] as Array<String>;
-                resolvePodcastNext();
-            }
+            reportFailed("up_next remove", responseCode);
             return;
         }
 
         Catalog.clearUpNextRemoval(_removals[0]);
         _removals = _removals.slice(1, null);
         removeNext();
+    }
+
+    // What a failed report does, for both outboxes. They had the same policy
+    // written out twice, which is two places for it to drift.
+    //
+    // A FLUSH reports the failure, because reporting is the only thing a flush
+    // was ever for. A REFRESH abandons the outboxes and carries on to naming
+    // the podcasts and committing, because the user came here to pick episodes
+    // and must not lose that to a tidy-up.
+    //
+    // Either way Storage is untouched - entries are cleared only on a
+    // confirmed 200 - so everything abandoned here goes out at the next
+    // opportunity. The in-memory arrays are emptied so nothing downstream
+    // tries to drain them; resolvePodcastNext() never reads them again.
+    private function reportFailed(what as String, responseCode as Number) as Void {
+        System.println("pc: " + what + " failed " + responseCode);
+        if (_flushing) {
+            finish(false, describeError(responseCode));
+            return;
+        }
+        _dirty = [] as Array<String>;
+        _removals = [] as Array<String>;
+        resolvePodcastNext();
     }
 
     // --- naming the podcasts ---
@@ -998,7 +999,7 @@ class PocketCastsClient {
         if (responseCode == 200 && data instanceof Dictionary) {
             var podcast = data.get("podcast");
             if (podcast instanceof Dictionary) {
-                var title = firstString(podcast, "title", "title");
+                var title = getString(podcast, "title");
                 if (title.length() > 0) {
                     applyPodcastTitle(podcastUuid, trim(title));
                 }
@@ -1034,8 +1035,8 @@ class PocketCastsClient {
             var episode = list[i];
             if (episode instanceof Dictionary) {
                 applyDuration(
-                    firstString(episode, "uuid", "uuid"),
-                    seconds(episode, "duration", "duration")
+                    getString(episode, "uuid"),
+                    secondsOf(episode, "duration")
                 );
             }
         }
@@ -1066,6 +1067,13 @@ class PocketCastsClient {
     // Read a string field under either of two names. The live API is camelCase
     // and the reference implementation's fixtures are snake_case; accepting
     // both costs nothing and saves a device debugging cycle.
+    // The single-name form, for the fields the two conventions happen to
+    // spell identically - passing the same name twice said nothing except
+    // that the two-name form was the only one available.
+    private function getString(source as Dictionary, name as String) as String {
+        return firstString(source, name, name);
+    }
+
     private function firstString(source as Dictionary, primary as String, fallback as String) as String {
         var value = source.get(primary);
         if (!(value instanceof String)) {
@@ -1081,6 +1089,10 @@ class PocketCastsClient {
     // in. Durations come back as a bare number from one endpoint and as a
     // decimal string from another, and playedUpTo has been seen both ways
     // too, so nothing here assumes a type.
+    private function secondsOf(source as Dictionary, name as String) as Number {
+        return seconds(source, name, name);
+    }
+
     private function seconds(source as Dictionary, primary as String, fallback as String) as Number {
         var value = source.get(primary);
         if (value == null) {

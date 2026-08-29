@@ -120,11 +120,7 @@ class GarminPocketCastsLoginDelegate extends WatchUi.Menu2InputDelegate {
             // exactly where someone who has just signed in wants to be; on a
             // rejected password it comes straight back here with the reason.
             // No auto-sync - picking playlists comes first.
-            WatchUi.switchToView(
-                new GarminPocketCastsRefreshView(false),
-                new GarminPocketCastsRefreshDelegate(),
-                WatchUi.SLIDE_LEFT
-            );
+            Nav.refresh(false, WatchUi.SLIDE_LEFT);
             return;
         }
 
@@ -133,11 +129,7 @@ class GarminPocketCastsLoginDelegate extends WatchUi.Menu2InputDelegate {
             // and keep playing - they are already on the watch and need no
             // token. Settings > Reset everything is the row that wipes those.
             Auth.signOut();
-            WatchUi.switchToView(
-                new GarminPocketCastsLoginView(null),
-                new GarminPocketCastsLoginDelegate(),
-                WatchUi.SLIDE_RIGHT
-            );
+            Nav.login(null, WatchUi.SLIDE_RIGHT);
             return;
         }
     }
@@ -147,11 +139,7 @@ class GarminPocketCastsLoginDelegate extends WatchUi.Menu2InputDelegate {
     // the deliberate route here; the automatic route (not signed in) has
     // nothing better to offer either, and Settings is one hop from the hub.
     function onBack() as Void {
-        WatchUi.switchToView(
-            new GarminPocketCastsSettingsView(),
-            new GarminPocketCastsSettingsDelegate(),
-            WatchUi.SLIDE_RIGHT
-        );
+        Nav.settings(WatchUi.SLIDE_RIGHT);
     }
 
 }

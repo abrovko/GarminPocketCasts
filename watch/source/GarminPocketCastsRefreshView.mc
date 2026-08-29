@@ -149,8 +149,13 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
             timer.stop();
         }
 
-        // Read before clearing, which is what breaks the view <-> client
-        // cycle. Monkey C is reference counted; a cycle is never collected.
+        // Breaks the view <-> client cycle. Monkey C is reference counted; a
+        // cycle is never collected.
+        //
+        // The null test is NOT redundant, however much it looks it: it is the
+        // only READ of _client anywhere, and a field whose entire job is to
+        // hold a reference alive is otherwise "not used" as far as the
+        // compiler is concerned. Dropping it costs a warning at -w -l 3.
         if (_client != null) {
             _client = null;
         }
@@ -182,11 +187,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         // just been signed out is waiting for.
         if (!Auth.hasCredentials()) {
             System.println("refresh: not signed in, msg=" + _message);
-            WatchUi.switchToView(
-                new GarminPocketCastsLoginView(_message),
-                new GarminPocketCastsLoginDelegate(),
-                WatchUi.SLIDE_LEFT
-            );
+            Nav.login(_message, WatchUi.SLIDE_LEFT);
             return;
         }
 
@@ -225,7 +226,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
             // see the episode in Up Next on their phone; this says which guard
             // turned it away.
             Catalog.logWhyNothingPending();
-            Hub.showUpToDate();
+            Nav.upToDate();
             return;
         }
 
@@ -234,11 +235,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         // suppressed retry shows Sync failed and Download now, and a first run
         // shows the toggles the user has not ticked yet.
         System.println("refresh: switching to menu, msg=" + _message);
-        WatchUi.switchToView(
-            new GarminPocketCastsConfigureSyncView(_message),
-            new GarminPocketCastsConfigureSyncDelegate(),
-            WatchUi.SLIDE_LEFT
-        );
+        Nav.picker(_message, WatchUi.SLIDE_LEFT);
     }
 
     // The way off this spinner when the sync's own switch never arrives.
@@ -327,11 +324,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         if (_attempts >= MAX_RESCUE_ATTEMPTS) {
             stopRescue();
         }
-        WatchUi.switchToView(
-            new GarminPocketCastsConfigurePlaybackView(),
-            new GarminPocketCastsConfigurePlaybackDelegate(),
-            WatchUi.SLIDE_LEFT
-        );
+        Nav.hub(WatchUi.SLIDE_LEFT);
     }
 
 }
@@ -369,11 +362,7 @@ class GarminPocketCastsRefreshDelegate extends WatchUi.BehaviorDelegate {
             System.println("refresh: cancelled by user");
             Communications.cancelAllRequests();
         }
-        WatchUi.switchToView(
-            new GarminPocketCastsConfigurePlaybackView(),
-            new GarminPocketCastsConfigurePlaybackDelegate(),
-            WatchUi.SLIDE_RIGHT
-        );
+        Nav.hub(WatchUi.SLIDE_RIGHT);
         return true;
     }
 

@@ -137,11 +137,7 @@ class GarminPocketCastsProxyDelegate extends WatchUi.Menu2InputDelegate {
     // is where this was reached from, and it is rebuilt here so its Playback
     // speed row shows whatever was just changed.
     function onBack() as Void {
-        WatchUi.switchToView(
-            new GarminPocketCastsSettingsView(),
-            new GarminPocketCastsSettingsDelegate(),
-            WatchUi.SLIDE_RIGHT
-        );
+        Nav.settings(WatchUi.SLIDE_RIGHT);
     }
 
 }

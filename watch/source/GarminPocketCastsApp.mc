@@ -51,11 +51,6 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
         var part = (settings has :partNumber) ? settings.partNumber : "?";
         System.println(Log.stamp() + " build " + BuildInfo.STAMP + " on " + part);
 
-        // Pick up a proxy address or token typed on the phone. Same reasoning
-        // as the purge below: this cannot live only here, because onStart()
-        // fires once per PROCESS and the process outlives the mode.
-        Proxy.applyPhoneSettings();
-
         // Reclaim the audio of episodes finished during an earlier invocation.
         // Here rather than at SONG_EVENT_COMPLETE on purpose: onStart() runs
         // before any content iterator exists, so nothing is holding the media
@@ -94,11 +89,12 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
     // method from API 1.2.0 with no app-type restriction; it is nonetheless
     // not safe to override in an audio content provider on this firmware.
     //
-    // Nothing is lost. Garmin renders app settings from an app's STORE
-    // LISTING, so a sideloaded install never receives a settings change for
-    // this to react to - see resources/settings/settings.xml. The four entry
-    // points call Proxy.applyPhoneSettings() themselves, which is what would
-    // pick a change up on a published build anyway, one screen later.
+    // Nothing is lost either way. Garmin renders app settings from an app's
+    // STORE LISTING rather than from the .prg, so a sideloaded install never
+    // receives a settings change for this to react to - measured, and the
+    // reason the settings resources and the property-reading code they fed
+    // have been removed. The TextPicker rows on Settings > Playback speed are
+    // the only way a proxy is configured.
 
     // Get a Media.ContentDelegate for use by the system to get and iterate through media on the device
     function getContentDelegate(arg as PersistableType) as ContentDelegate {
@@ -111,7 +107,6 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
 
     // Get a delegate that communicates sync status to the system for syncing media content to the device
     function getSyncDelegate() as Communications.SyncDelegate? {
-        Proxy.applyPhoneSettings();
         Catalog.purgeFinished();
         // Safe here: getSyncDelegate() is called BEFORE onStartSync(), so no
         // download is in flight and no ref id is waiting to be written.
@@ -121,7 +116,6 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
 
     // Get the initial view for configuring playback
     function getPlaybackConfigurationView() as [Views] or [Views, InputDelegates] {
-        Proxy.applyPhoneSettings();
         // Before the menu is built, so a finished episode's row is gone the
         // first time the user comes back to the hub rather than the time
         // after. The menu is a Menu2 and will not redraw itself.
@@ -163,7 +157,6 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
     // so they have to be fetched before it is constructed. The refresh view
     // switches the menu in when the API answers - or when it does not.
     function getSyncConfigurationView() as [Views] or [Views, InputDelegates] {
-        Proxy.applyPhoneSettings();
         Catalog.purgeFinished();
         Catalog.reclaimOrphans(false);
         var view = new GarminPocketCastsRefreshView(false);

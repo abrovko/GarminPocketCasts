@@ -396,11 +396,7 @@ module Catalog {
     }
 
     function getRecord(uuid as String) as Dictionary? {
-        var stored = Storage.getValue(recordKey(uuid));
-        if (stored instanceof Dictionary) {
-            return stored as Dictionary;
-        }
-        return null;
+        return Store.getDictOrNull(recordKey(uuid));
     }
 
     function putRecord(uuid as String, record as Dictionary<String, PersistableType>) as Void {
@@ -423,6 +419,42 @@ module Catalog {
 
     function putIds(storageKey as String, ids as Array<String>) as Void {
         Storage.setValue(storageKey, ids as Array<Storage.ValueType>);
+    }
+
+    // Add a uuid to one of the id-list keys, or leave it be if it is already
+    // there. `max` caps the list with the oldest falling off the front; 0
+    // means uncapped.
+    //
+    // Nine places used to spell this out - markForPurge, markFinished,
+    // queueUpNextRemoval, markPlayed, markDirty and their four opposites -
+    // which put the "is it already here" test in five copies and the cap in
+    // two. The cap in particular has a consequence worth having in one place:
+    // an entry that falls off the front of FINISHED_KEY becomes downloadable
+    // again.
+    //
+    // Returns whether anything actually changed, so a caller can log a real
+    // addition without re-reading the list to find out.
+    function addId(storageKey as String, uuid as String, max as Number) as Boolean {
+        var ids = getIds(storageKey);
+        if (ids.indexOf(uuid) >= 0) {
+            return false;
+        }
+        ids.add(uuid);
+        while (max > 0 && ids.size() > max) {
+            ids = ids.slice(1, null);
+        }
+        putIds(storageKey, ids);
+        return true;
+    }
+
+    function removeId(storageKey as String, uuid as String) as Boolean {
+        var ids = getIds(storageKey);
+        if (ids.indexOf(uuid) < 0) {
+            return false;
+        }
+        ids.remove(uuid);
+        putIds(storageKey, ids);
+        return true;
     }
 
     function tracksFor(ids as Array<String>) as Array<Track> {
@@ -663,8 +695,8 @@ module Catalog {
     }
 
     function getListTitle(id as String) as String {
-        var stored = Storage.getValue(listKey(id));
-        if (stored instanceof Dictionary) {
+        var stored = Store.getDictOrNull(listKey(id));
+        if (stored != null) {
             var title = stored.get("t");
             if (title instanceof String) {
                 return title;
@@ -708,17 +740,21 @@ module Catalog {
         var episodes = getListEpisodeIds(id);
         var selected = getSelectedLists();
 
-        for (var i = 0; i < episodes.size(); i++) {
-            var uuid = episodes[i];
-            var wantedElsewhere = false;
-            for (var j = 0; j < selected.size(); j++) {
-                if (getListEpisodeIds(selected[j]).indexOf(uuid) >= 0) {
-                    wantedElsewhere = true;
-                    break;
-                }
+        // Every still-selected playlist read ONCE, into a set. Asking
+        // getListEpisodeIds() inside the loop meant a Storage read and an
+        // array deserialise per episode per playlist - a playlist of 20 across
+        // three still-selected ones was 60 reads of arrays already in hand.
+        var wantedElsewhere = {} as Dictionary<String, Boolean>;
+        for (var i = 0; i < selected.size(); i++) {
+            var others = getListEpisodeIds(selected[i]);
+            for (var j = 0; j < others.size(); j++) {
+                wantedElsewhere.put(others[j], true);
             }
-            if (!wantedElsewhere) {
-                removeDownload(uuid);
+        }
+
+        for (var i = 0; i < episodes.size(); i++) {
+            if (!wantedElsewhere.hasKey(episodes[i])) {
+                removeDownload(episodes[i]);
             }
         }
     }
@@ -731,11 +767,7 @@ module Catalog {
     // cast to String here would be an unchecked lie that works right up until
     // it does not.
     function getRefIds() as Dictionary<String, PersistableType> {
-        var stored = Storage.getValue(REF_IDS_KEY);
-        if (stored instanceof Dictionary) {
-            return stored as Dictionary<String, PersistableType>;
-        }
-        return {} as Dictionary<String, PersistableType>;
+        return Store.getDict(REF_IDS_KEY);
     }
 
     // Record a finished download: the ref id, the episode's own record, and
@@ -770,8 +802,8 @@ module Catalog {
             return;
         }
 
-        Toybox.Media.deleteCachedItem(
-            new Toybox.Media.ContentRef(refId as Object, Toybox.Media.CONTENT_TYPE_AUDIO)
+        Media.deleteCachedItem(
+            new Media.ContentRef(refId as Object, Media.CONTENT_TYPE_AUDIO)
         );
         refIds.remove(key);
         Storage.setValue(REF_IDS_KEY, refIds as Dictionary<Storage.KeyType, Storage.ValueType>);
@@ -789,9 +821,6 @@ module Catalog {
         deleteRecord(key);
     }
 
-    // Forget what has been downloaded. Pair this with Media.resetContentCache(),
-    // which wipes the audio itself - leaving one without the other strands
-    // ContentRef ids that no longer resolve.
     // Wipe everything this app owns and go back to a first-install state.
     //
     // Storage.clearValues() rather than a list of deleteValue() calls, on
@@ -847,9 +876,24 @@ module Catalog {
     // Both the sync delegate's isSyncNeeded() and the configure menu's
     // back-out read this, so the two can never disagree about whether a sync
     // is worth starting.
-    function getPendingTracks() as Array<Track> {
+    //
+    // IDS, NOT TRACKS, because most callers only ever wanted the count.
+    // Building the Track objects costs a Storage read and a deserialise per
+    // pending episode, and hasPendingDownloads() - reached from shouldSync(),
+    // reached from the isSyncNeeded() the system polls with nobody watching -
+    // threw every one of them away again. getPendingTracks() below is the
+    // caller that genuinely needs them.
+    function getPendingIds() as Array<String> {
         var refIds = getRefIds();
         var selected = getSelectedListsInOrder();
+
+        // Read once, not once per episode. isFinished() deserialises the
+        // whole of FINISHED_KEY - up to MAX_FINISHED uuids, ~3.8 KB - on every
+        // call, and the loop below used to ask it for every episode of every
+        // selected playlist. This is the one code path the system polls
+        // unattended, so it is the one where that matters to the battery.
+        var finished = getIds(FINISHED_KEY);
+
         var seen = {} as Dictionary<String, Boolean>;
         var wanted = [] as Array<String>;
 
@@ -875,7 +919,7 @@ module Catalog {
             var episodes = getListEpisodeIds(selected[i]);
             for (var j = 0; j < episodes.size(); j++) {
                 var uuid = episodes[j];
-                if (seen.hasKey(uuid) || refIds.hasKey(uuid) || isFinished(uuid)) {
+                if (seen.hasKey(uuid) || refIds.hasKey(uuid) || finished.indexOf(uuid) >= 0) {
                     continue;
                 }
                 seen.put(uuid, true);
@@ -883,11 +927,15 @@ module Catalog {
             }
         }
 
-        return tracksFor(wanted);
+        return wanted;
+    }
+
+    function getPendingTracks() as Array<Track> {
+        return tracksFor(getPendingIds());
     }
 
     function hasPendingDownloads() as Boolean {
-        return getPendingTracks().size() > 0;
+        return getPendingIds().size() > 0;
     }
 
     // Episodes that have been downloaded, in download order. Read from
@@ -917,11 +965,7 @@ module Catalog {
     // roughly 180 episodes, far more than MAX_EPISODES.
 
     function getPositions() as Dictionary<String, PersistableType> {
-        var stored = Storage.getValue(POSITIONS_KEY);
-        if (stored instanceof Dictionary) {
-            return stored as Dictionary<String, PersistableType>;
-        }
-        return {} as Dictionary<String, PersistableType>;
+        return Store.getDict(POSITIONS_KEY);
     }
 
     function getPosition(uuid as String) as Number {
@@ -973,11 +1017,7 @@ module Catalog {
     // which is longer than the episode's record survives once auto-delete has
     // it. See getPodcastFor().
     function getOutboxPodcasts() as Dictionary<String, PersistableType> {
-        var stored = Storage.getValue(OUTBOX_PODCAST_KEY);
-        if (stored instanceof Dictionary) {
-            return stored as Dictionary<String, PersistableType>;
-        }
-        return {} as Dictionary<String, PersistableType>;
+        return Store.getDict(OUTBOX_PODCAST_KEY);
     }
 
     function markDirty(uuid as String) as Void {
@@ -996,12 +1036,7 @@ module Catalog {
             }
         }
 
-        var ids = getDirtyKeys();
-        if (ids.indexOf(uuid) >= 0) {
-            return;
-        }
-        ids.add(uuid);
-        putIds(DIRTY_KEY, ids);
+        addId(DIRTY_KEY, uuid, 0);
     }
 
     function clearDirty(uuid as String) as Void {
@@ -1014,12 +1049,7 @@ module Catalog {
             );
         }
 
-        var ids = getDirtyKeys();
-        if (ids.indexOf(uuid) < 0) {
-            return;
-        }
-        ids.remove(uuid);
-        putIds(DIRTY_KEY, ids);
+        removeId(DIRTY_KEY, uuid);
     }
 
     // --- taking an episode off Up Next ---
@@ -1061,16 +1091,9 @@ module Catalog {
         if (getListEpisodeIds(UP_NEXT_ID).indexOf(uuid) < 0) {
             return;
         }
-        var ids = getUpNextRemovals();
-        if (ids.indexOf(uuid) >= 0) {
-            return;
+        if (addId(UPNEXT_RM_KEY, uuid, MAX_UPNEXT_REMOVALS)) {
+            System.println("catalog: queued " + uuid + " for removal from Up Next");
         }
-        ids.add(uuid);
-        while (ids.size() > MAX_UPNEXT_REMOVALS) {
-            ids = ids.slice(1, null);
-        }
-        System.println("catalog: queued " + uuid + " for removal from Up Next");
-        putIds(UPNEXT_RM_KEY, ids);
     }
 
     // Why getPendingTracks() came back empty, one line per episode.
@@ -1087,6 +1110,7 @@ module Catalog {
     function logWhyNothingPending() as Void {
         var refIds = getRefIds();
         var selected = getSelectedListsInOrder();
+        var finished = getIds(FINISHED_KEY);
         var shown = 0;
 
         for (var i = 0; i < selected.size(); i++) {
@@ -1100,7 +1124,7 @@ module Catalog {
                 var why = "downloaded";
                 if (refIds.hasKey(uuid)) {
                     why = "already held";
-                } else if (isFinished(uuid)) {
+                } else if (finished.indexOf(uuid) >= 0) {
                     // The interesting one, and the reason this exists: it has
                     // been listened to here and has not left the queue since,
                     // so it is not a fresh instruction. Taking it off Up Next
@@ -1123,12 +1147,7 @@ module Catalog {
     }
 
     function clearUpNextRemoval(uuid as String) as Void {
-        var ids = getUpNextRemovals();
-        if (ids.indexOf(uuid) < 0) {
-            return;
-        }
-        ids.remove(uuid);
-        putIds(UPNEXT_RM_KEY, ids);
+        removeId(UPNEXT_RM_KEY, uuid);
     }
 
     // Finishing an episode is reported as a STATUS, never as a position.
@@ -1148,11 +1167,7 @@ module Catalog {
     // Everything that follows from an episode being listened to right through:
     // report it as played, never download it again, and reclaim its audio.
     function markPlayed(uuid as String) as Void {
-        var ids = getPlayedKeys();
-        if (ids.indexOf(uuid) < 0) {
-            ids.add(uuid);
-            putIds(PLAYED_KEY, ids);
-        }
+        addId(PLAYED_KEY, uuid, 0);
         markDirty(uuid);
         markFinished(uuid);
 
@@ -1230,15 +1245,7 @@ module Catalog {
     }
 
     function markFinished(uuid as String) as Void {
-        var ids = getIds(FINISHED_KEY);
-        if (ids.indexOf(uuid) >= 0) {
-            return;
-        }
-        ids.add(uuid);
-        while (ids.size() > MAX_FINISHED) {
-            ids = ids.slice(1, null);
-        }
-        putIds(FINISHED_KEY, ids);
+        addId(FINISHED_KEY, uuid, MAX_FINISHED);
     }
 
     // --- deferred deletion ---
@@ -1268,12 +1275,7 @@ module Catalog {
     // non-playback entry point as well.
 
     function markForPurge(uuid as String) as Void {
-        var ids = getIds(PURGE_KEY);
-        if (ids.indexOf(uuid) >= 0) {
-            return;
-        }
-        ids.add(uuid);
-        putIds(PURGE_KEY, ids);
+        addId(PURGE_KEY, uuid, 0);
     }
 
     // Re-lay DOWNLOADED_KEY into playlist order.
@@ -1345,13 +1347,9 @@ module Catalog {
     // Drop an episode from the playable list without touching its audio or its
     // ref id, both of which purgeFinished() still needs.
     function retireDownload(key as String) as Void {
-        var ids = getIds(DOWNLOADED_KEY);
-        if (ids.indexOf(key) < 0) {
-            return;
+        if (removeId(DOWNLOADED_KEY, key)) {
+            System.println("catalog: retired " + key + " from the playable list");
         }
-        ids.remove(key);
-        putIds(DOWNLOADED_KEY, ids);
-        System.println("catalog: retired " + key + " from the playable list");
     }
 
     // The episodes the media player is currently walking.
@@ -1421,6 +1419,11 @@ module Catalog {
             return;
         }
 
+        // Both read once. isPlayed() and isDirty() each deserialise their
+        // whole array, and they were called per queued episode.
+        var played = getIds(PLAYED_KEY);
+        var dirty = getIds(DIRTY_KEY);
+
         var deferred = [] as Array<String>;
         var purged = 0;
         var unreported = 0;
@@ -1437,7 +1440,7 @@ module Catalog {
             // device when the phone was out of reach at the moment it
             // finished. The bytes wait for the report; the row has already
             // gone, so all this costs is cache on a ~7.1 GB store.
-            if (isPlayed(ids[i]) && isDirty(ids[i])) {
+            if (played.indexOf(ids[i]) >= 0 && dirty.indexOf(ids[i]) >= 0) {
                 deferred.add(ids[i]);
                 unreported++;
                 continue;
@@ -1603,12 +1606,7 @@ module Catalog {
     }
 
     function clearPlayed(uuid as String) as Void {
-        var ids = getPlayedKeys();
-        if (ids.indexOf(uuid) < 0) {
-            return;
-        }
-        ids.remove(uuid);
-        putIds(PLAYED_KEY, ids);
+        removeId(PLAYED_KEY, uuid);
     }
 
     // Fold a position the server reports into what we hold locally.
@@ -1686,8 +1684,7 @@ module Catalog {
     // can retry deliberately; what they do not get is the watch deciding to
     // retry forever on their behalf.
     function isSyncBlocked() as Boolean {
-        var blocked = Storage.getValue(SYNC_BLOCK_KEY);
-        return blocked instanceof Boolean && blocked;
+        return Store.getBool(SYNC_BLOCK_KEY, false);
     }
 
     function setSyncBlocked(blocked as Boolean) as Void {
@@ -1703,11 +1700,7 @@ module Catalog {
     // user backs out, nothing happens, and there is nothing on screen to
     // explain it. Cleared by a sync that succeeds.
     function getSyncError() as String? {
-        var stored = Storage.getValue(SYNC_ERROR_KEY);
-        if (stored instanceof String) {
-            return stored;
-        }
-        return null;
+        return Store.getStringOrNull(SYNC_ERROR_KEY);
     }
 
     function setSyncError(message as String?) as Void {
@@ -1729,7 +1722,9 @@ module Catalog {
     // channel there is, and every question about the sync loop is answered by
     // these five numbers.
     function logState(tag as String) as Void {
-        var pending = getPendingTracks();
+        // Ids rather than Tracks: this runs on every isSyncNeeded(), and only
+        // the uuid is printed.
+        var pending = getPendingIds();
         System.println(Log.stamp() + " " + tag + ": lists=" + getListIds().size() +
             " downloaded=" + getIds(DOWNLOADED_KEY).size() +
             " selectedLists=" + getSelectedLists().size() +
@@ -1737,7 +1732,7 @@ module Catalog {
             " pending=" + pending.size() +
             " blocked=" + isSyncBlocked());
         for (var i = 0; i < pending.size(); i++) {
-            System.println(tag + ": PENDING " + pending[i].key);
+            System.println(tag + ": PENDING " + pending[i]);
         }
     }
 }

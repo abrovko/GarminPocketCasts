@@ -83,19 +83,11 @@ class GarminPocketCastsDeleteDelegate extends WatchUi.Menu2InputDelegate {
         // Rebuilt rather than repainted - a Menu2 cannot drop a row - and
         // switched rather than pushed, like every other view here, so there is
         // never a stale copy underneath.
-        WatchUi.switchToView(
-            new GarminPocketCastsDeleteView(),
-            new GarminPocketCastsDeleteDelegate(),
-            WatchUi.SLIDE_IMMEDIATE
-        );
+        Nav.deleteEpisodes(WatchUi.SLIDE_IMMEDIATE);
     }
 
     function onBack() as Void {
-        WatchUi.switchToView(
-            new GarminPocketCastsSettingsView(),
-            new GarminPocketCastsSettingsDelegate(),
-            WatchUi.SLIDE_RIGHT
-        );
+        Nav.settings(WatchUi.SLIDE_RIGHT);
     }
 
 }

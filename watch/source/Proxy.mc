@@ -37,20 +37,6 @@ module Proxy {
     const BITRATE_KEY = "pxRate";   // Number, kbps
     const MONO_KEY = "pxMono";      // Boolean
 
-    // The phone-side settings, and what we last took from them.
-    //
-    // INERT ON A SIDELOADED INSTALL - see resources/settings/settings.xml for
-    // the measurement. Garmin draws the settings UI from an app's store
-    // listing rather than from the .prg, so nothing appears on the phone until
-    // this app is published. readProperty() then simply answers null and the
-    // TextPicker rows are the only way in, which is why the device-dependent
-    // entry cap they carry - as low as 31 characters, see setUrl() - still
-    // shapes everything around them.
-    const URL_PROP = "proxyServerProp";
-    const TOKEN_PROP = "proxyTokenProp";
-    const URL_SEEN_KEY = "pxUrlSeen";
-    const TOKEN_SEEN_KEY = "pxTokSeen";
-
     // Speed travels as an integer percentage rather than a Float because the
     // number is written into every downloaded episode's record and divides
     // its playback position forever after. An integer round-trips through
@@ -63,13 +49,11 @@ module Proxy {
     // --- what is configured ---
 
     function getUrl() as String {
-        var stored = Storage.getValue(URL_KEY);
-        return stored instanceof String ? stored : "";
+        return Store.getString(URL_KEY, "");
     }
 
     function getToken() as String {
-        var stored = Storage.getValue(TOKEN_KEY);
-        return stored instanceof String ? stored : "";
+        return Store.getString(TOKEN_KEY, "");
     }
 
     // Both halves, or this watch has no proxy - exactly like
@@ -164,83 +148,6 @@ module Proxy {
         System.println("proxy: cleared");
     }
 
-    // --- settings from the phone ---
-
-    // Take anything new from Garmin Connect Mobile and put it in Storage.
-    //
-    // PROPERTIES ARE AN INPUT CHANNEL, NOT THE STORE. Everything else in this
-    // app reads Storage, and that does not change: this copies a value across
-    // when the phone offers a different one. Keeping Storage as the single
-    // thing read is what stops the watch rows and the phone settings becoming
-    // two sources of truth that disagree.
-    //
-    // The "seen" keys are what make a watch edit survive. Copying whenever the
-    // property merely DIFFERS from Storage would undo an on-watch change at
-    // the next entry point, every time, since the property still holds the old
-    // address. Comparing against the last value we consumed instead means the
-    // phone only wins when the phone actually changed - and an empty value is
-    // a change like any other, so clearing the setting clears the watch.
-    function applyPhoneSettings() as Void {
-        consumePhoneValue(URL_PROP, URL_SEEN_KEY, URL_KEY, true);
-        consumePhoneValue(TOKEN_PROP, TOKEN_SEEN_KEY, TOKEN_KEY, false);
-    }
-
-    function consumePhoneValue(
-        propKey as String,
-        seenKey as String,
-        storeKey as String,
-        isUrl as Boolean
-    ) as Void {
-        var incoming = readProperty(propKey);
-        if (incoming == null) {
-            // No properties on this device or in this context. The TextPicker
-            // rows are still there, so there is nothing to report.
-            return;
-        }
-
-        var value = Auth.trim(incoming);
-        var stored = Storage.getValue(seenKey);
-        var seen = stored instanceof String ? stored : "";
-        if (value.equals(seen)) {
-            return;
-        }
-
-        Storage.setValue(seenKey, value);
-
-        if (value.length() == 0) {
-            Storage.deleteValue(storeKey);
-        } else if (isUrl) {
-            setUrl(value);
-        } else {
-            setToken(value);
-        }
-
-        // Never the value itself for the token - the device log is a plain
-        // file on something that mounts over USB.
-        System.println("proxy: " + (isUrl ? "server" : "token") + " updated from phone settings");
-    }
-
-    // Read one property, or null if this build cannot.
-    //
-    // Guarded AND wrapped. The guard is the usual one for anything whose
-    // availability is not guaranteed across 57 products; the try/catch covers
-    // a key the property store does not carry, which is what a device would do
-    // if app settings turned out not to reach an audio content provider at
-    // all. Either way the answer is null, the TextPicker rows keep working,
-    // and nothing crashes - which is the whole reason this is additive rather
-    // than a replacement for them.
-    function readProperty(key as String) as String? {
-        if (!(Application has :Properties)) {
-            return null;
-        }
-        try {
-            var value = Properties.getValue(key);
-            return value instanceof String ? value : null;
-        } catch (e) {
-            return null;
-        }
-    }
-
     // --- speed ---
 
     // The speeds offered, in the order the Speed row cycles through them.
@@ -251,11 +158,7 @@ module Proxy {
     }
 
     function getSpeedPercent() as Number {
-        var stored = Storage.getValue(SPEED_KEY);
-        if (stored instanceof Number && stored > 0) {
-            return stored;
-        }
-        return DEFAULT_SPEED;
+        return Store.getPositiveNumber(SPEED_KEY, DEFAULT_SPEED);
     }
 
     function setSpeedPercent(percent as Number) as Void {
@@ -307,19 +210,11 @@ module Proxy {
     }
 
     function getBitrate() as Number {
-        var stored = Storage.getValue(BITRATE_KEY);
-        if (stored instanceof Number && stored > 0) {
-            return stored;
-        }
-        return DEFAULT_BITRATE;
+        return Store.getPositiveNumber(BITRATE_KEY, DEFAULT_BITRATE);
     }
 
     function getMono() as Boolean {
-        var stored = Storage.getValue(MONO_KEY);
-        if (stored instanceof Boolean) {
-            return stored;
-        }
-        return DEFAULT_MONO;
+        return Store.getBool(MONO_KEY, DEFAULT_MONO);
     }
 
     // Bitrate and mono are stored as themselves rather than as an index into

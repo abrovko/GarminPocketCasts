@@ -104,22 +104,6 @@ class GarminPocketCastsContentDelegate extends Media.ContentDelegate {
         return iterator;
     }
 
-    // Respond to a user ad click
-    function onAdAction(adContext as Object) as Void {
-    }
-
-    // Respond to a thumbs-up action
-    function onThumbsUp(contentRefId as Object) as Void {
-    }
-
-    // Respond to a thumbs-down action
-    function onThumbsDown(contentRefId as Object) as Void {
-    }
-
-    // Respond to a command to turn shuffle on or off
-    function onShuffle() as Void {
-    }
-
     // Playback events from the media player. A real provider would bank these
     // in Storage and report them back to the service on the next sync.
     function onSong(contentRefId as Object, songEvent as SongEvent, playbackPosition as Number or PlaybackPosition) as Void {

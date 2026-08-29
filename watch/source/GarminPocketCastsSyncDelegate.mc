@@ -183,9 +183,6 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
         completeSync();
     }
 
-    // The user abandoned the sync from the system's screen. Spend the flag but
-    // do not act on it: a cancel is not a download to show off, and dropping
-    // them back on the playlists they came from is what they asked for.
     // Sync mode ending. NOT necessarily a cancel - see below.
     //
     // The log line goes FIRST, before every guard, because this used to leave
@@ -232,11 +229,7 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
         // answer, and the first one to take it does the switch.
         if (Catalog.takeSyncFromMenu()) {
             System.println("sync: onStopSync landing on the playback hub");
-            WatchUi.switchToView(
-                new GarminPocketCastsConfigurePlaybackView(),
-                new GarminPocketCastsConfigurePlaybackDelegate(),
-                WatchUi.SLIDE_RIGHT
-            );
+            Nav.hub(WatchUi.SLIDE_RIGHT);
         }
 
         Communications.notifySyncComplete(null);
@@ -280,11 +273,7 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
                 // the downloads, which is the whole reason this cannot be done
                 // by switching the view before the sync starts.
                 System.println("sync: landing on the playback hub");
-                WatchUi.switchToView(
-                    new GarminPocketCastsConfigurePlaybackView(),
-                    new GarminPocketCastsConfigurePlaybackDelegate(),
-                    WatchUi.SLIDE_RIGHT
-                );
+                Nav.hub(WatchUi.SLIDE_RIGHT);
             } else {
                 // A REBUILT playlists menu, not the stale one underneath. That one
                 // was constructed before the sync and cannot redraw itself, so
@@ -293,11 +282,7 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
                 // the menu reads Storage; only updating the playlists needs the
                 // refresh view.
                 System.println("sync: landing on the list menu, error=" + error);
-                WatchUi.switchToView(
-                    new GarminPocketCastsConfigureSyncView(error),
-                    new GarminPocketCastsConfigureSyncDelegate(),
-                    WatchUi.SLIDE_IMMEDIATE
-                );
+                Nav.picker(error, WatchUi.SLIDE_IMMEDIATE);
             }
         }
 
@@ -355,7 +340,7 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
         // stopping a download they did not want right then. The flag is for a
         // sync that TRIED and got nowhere, which is the thing that would
         // otherwise loop.
-        var remaining = Catalog.getPendingTracks().size();
+        var remaining = Catalog.getPendingIds().size();
         Catalog.setSyncBlocked(!_cancelled && _total > 0 && remaining >= _total);
 
         // Carry the reason forward so the sync menu can show it. A null

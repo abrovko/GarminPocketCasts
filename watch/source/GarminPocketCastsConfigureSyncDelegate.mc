@@ -25,7 +25,7 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
             // this menu with nothing pending already goes, so the two agree.
             if (!Catalog.hasPendingDownloads()) {
                 System.println("onSelect: download now, nothing pending");
-                Hub.showUpToDate();
+                Nav.upToDate();
                 return;
             }
 
@@ -43,11 +43,7 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
         // auto-sync: the user is standing in the picker, so the answer they
         // want is the refreshed menu, not a download starting under them.
         if (id.equals(GarminPocketCastsConfigureSyncView.REFRESH_ID)) {
-            WatchUi.switchToView(
-                new GarminPocketCastsRefreshView(false),
-                new GarminPocketCastsRefreshDelegate(),
-                WatchUi.SLIDE_LEFT
-            );
+            Nav.refresh(false, WatchUi.SLIDE_LEFT);
             return;
         }
 
@@ -87,11 +83,7 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
         if (Catalog.isSyncBlocked()) {
             System.println("onBack: sync blocked, skipping auto-sync");
             Catalog.setSyncBlocked(false);
-            WatchUi.switchToView(
-                new GarminPocketCastsConfigurePlaybackView(),
-                new GarminPocketCastsConfigurePlaybackDelegate(),
-                WatchUi.SLIDE_RIGHT
-            );
+            Nav.hub(WatchUi.SLIDE_RIGHT);
             return;
         }
 
@@ -100,11 +92,7 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
             return;
         }
 
-        WatchUi.switchToView(
-            new GarminPocketCastsConfigurePlaybackView(),
-            new GarminPocketCastsConfigurePlaybackDelegate(),
-            WatchUi.SLIDE_RIGHT
-        );
+        Nav.hub(WatchUi.SLIDE_RIGHT);
     }
 
 }
