@@ -10,6 +10,11 @@ class GarminPocketCastsContentIterator extends Media.ContentIterator {
     // The two jumps podcast listeners actually use: forward past an ad or a
     // digression, back over something missed. Asymmetric on purpose - that is
     // the convention every podcast app follows.
+    //
+    // THESE TWO NUMBERS ARE DRAWN ON THE BUTTONS. The glyphs in
+    // resources/drawables/skip_*.svg spell them out, so changing one here
+    // without regenerating the art leaves the player advertising a skip the
+    // app does not perform - which is the exact bug SkipButton exists to fix.
     static const SKIP_FORWARD_SECONDS = 30;
     static const SKIP_BACKWARD_SECONDS = 10;
 
@@ -213,11 +218,36 @@ class GarminPocketCastsContentIterator extends Media.ContentIterator {
         // PLAYBACK stays in the middle rather than first, because leading with
         // it produced a second play button - the player already renders
         // play/pause itself.
-        profile.playbackControls = [
-            PLAYBACK_CONTROL_SKIP_FORWARD,
-            PLAYBACK_CONTROL_PLAYBACK,
-            PLAYBACK_CONTROL_SKIP_BACKWARD
-        ];
+        //
+        // The two skip buttons carry their own art, because the stock icons
+        // have "30" baked into them and we skip back 10 - see SkipButton.
+        // Guarded like getProviderIconInfo: Media.SystemButton is API 3.0.3,
+        // well under this app's 5.0.0 floor, and the export build compiles
+        // clean whether or not the guard is there. All 57 products in
+        // manifest.xml were checked against their SDK api.debug.xml and every
+        // one declares it, so the fallback is belt and braces - but it is the
+        // only thing standing between a firmware that drops the class and an
+        // app with no transport controls at all.
+        //
+        // A SystemButton leads the array rather than the bare enum. It wraps
+        // PLAYBACK_CONTROL_SKIP_FORWARD, so the hotkey binding of rule 4
+        // should be unaffected; that is the one thing here only the watch can
+        // confirm.
+        if (Media has :SystemButton) {
+            profile.playbackControls = [
+                new SkipButton(PLAYBACK_CONTROL_SKIP_FORWARD,
+                    Rez.Drawables.SkipForwardIcon, Rez.Drawables.SkipForwardDetail),
+                PLAYBACK_CONTROL_PLAYBACK,
+                new SkipButton(PLAYBACK_CONTROL_SKIP_BACKWARD,
+                    Rez.Drawables.SkipBackwardIcon, Rez.Drawables.SkipBackwardDetail)
+            ];
+        } else {
+            profile.playbackControls = [
+                PLAYBACK_CONTROL_SKIP_FORWARD,
+                PLAYBACK_CONTROL_PLAYBACK,
+                PLAYBACK_CONTROL_SKIP_BACKWARD
+            ];
+        }
         // SKIP IS IN CONTENT SECONDS, so the deltas are scaled down for a file
         // that plays faster than it was recorded. Pocket Casts, Overcast,
         // Apple Podcasts and Spotify all anchor the skip button to episode

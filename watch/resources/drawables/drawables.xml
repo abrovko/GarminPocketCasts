@@ -1,3 +1,35 @@
 <drawables xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://developer.garmin.com/downloads/connect-iq/resources.xsd">
     <bitmap id="LauncherIcon" filename="launcher_icon.svg" dithering="none" />
+
+    <!-- Media player transport buttons.
+
+         The stock skip art has "30" baked into it, and Garmin's own doc for
+         PlaybackProfile.skipBackwardTimeDelta says so: overriding the delta
+         "will be necessary to provide a custom icon ... as the default
+         indicates 30 seconds". We skip back 10, so the stock button lies.
+         SkipButton feeds these to the player through Media.SystemButton.
+
+         SIZED IN PIXELS, NOT AS A FRACTION OF THE SCREEN. These were 15% and
+         22% of screen width, which is what the launcher sizes work out at
+         across the 57 products - and it was wrong. Measured on hardware: the
+         fenix 7X renders 42/62px correctly, and the fenix 8 CLIPPED the same
+         art at 68/100px on the playback screen while drawing it correctly on
+         the control dial. If the player's button slot scaled with the screen
+         that could not happen, so the slot is near enough a fixed box and the
+         art has to be a fixed size too. There is no button size in any
+         device's compiler.json - launcherIcon.width is the only icon
+         dimension the SDK publishes - so these numbers come from the watch
+         and nowhere else.
+
+         Deliberately a little under the fenix 7X's proven 42/62: the cost of
+         being small is that it looks small, and the cost of being big is that
+         it vanishes.
+
+         DETAIL is the larger image the player draws for a highlighted button,
+         so it is bigger than ICON rather than a copy. Both come off the same
+         SVG - one art file per glyph. -->
+    <bitmap id="SkipForwardIcon" filename="skip_forward.svg" dithering="none" compress="true" scaleX="44" scaleY="44" />
+    <bitmap id="SkipForwardDetail" filename="skip_forward.svg" dithering="none" compress="true" scaleX="60" scaleY="60" />
+    <bitmap id="SkipBackwardIcon" filename="skip_backward.svg" dithering="none" compress="true" scaleX="44" scaleY="44" />
+    <bitmap id="SkipBackwardDetail" filename="skip_backward.svg" dithering="none" compress="true" scaleX="60" scaleY="60" />
 </drawables>
