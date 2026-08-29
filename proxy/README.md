@@ -15,15 +15,14 @@ at full size. A proxy that is down costs you speed, never episodes.
 ## Why to use it even at 1.0×
 
 Re-encoding to 64 kbps mono makes an episode about three times smaller. Against a real
-39-minute episode (37,190,068 bytes) and the app's measured download throughput of ~25 KB/s on
-battery and ~150 KB/s on the charger:
+39-minute episode (37,190,068 bytes):
 
-| Configuration | Size | Charging | Battery |
-| --- | --- | --- | --- |
-| unproxied — 1.0× / 128k stereo | 37.2 MB | 4 min | 25 min |
-| 1.0× / 64k mono | 18.7 MB | 2 min | 12 min |
-| 1.5× / 64k mono | 12.5 MB | 83 s | 8 min |
-| 2.0× / 64k mono | 9.4 MB | 63 s | 6 min |
+| Configuration | Size |
+| --- | --- |
+| unproxied — 1.0× / 128k stereo | 37.2 MB |
+| 1.0× / 64k mono | 18.7 MB |
+| 1.5× / 64k mono | 12.5 MB |
+| 2.0× / 64k mono | 9.4 MB |
 
 `speed: 100` is a valid setting: it takes the size reduction and leaves the audio alone.
 
@@ -31,8 +30,8 @@ battery and ~150 KB/s on the charger:
 
 At a few episodes a day this stays inside Google Cloud's free tier. There is no bucket, no
 database and no always-on instance — the container starts on the first request and scales to
-zero when you stop syncing. The request is held open for the whole download, so an 8-minute
-transfer on watch battery is 8 minutes of instance time.
+zero when you stop syncing. The request is held open for the whole download, so a transfer that
+takes eight minutes on a slow network is eight minutes of instance time.
 
 ## Deploy
 
