@@ -71,10 +71,16 @@ and 256 on a fēnix 8**. 32 random bytes base64url-encode to 43, which a fēnix 
 16 bytes give a 22-character token, which every watch can.
 
 If the only watch you will ever set this up from has a roomy picker, use 32 bytes — it is
-strictly better and costs nothing. Just know the trade: **the token has to be typed on every
+strictly better and costs nothing. Just know the trade: **the token has to be entered on every
 watch that uses the proxy**, so a 43-character one locks out any watch with a 31-character
 picker, and the only symptom there is a 401. There is no way to find a device's cap except to
 try it. When in doubt, 16 bytes.
+
+Entering it is less painful than it sounds. **With your phone in range the picker opens a text
+field and a keyboard on the phone, so you paste rather than type** — nothing has to be spelled
+out on the watch itself. What the phone does not change is the limit: the cap belongs to the
+watch's picker and applies to pasted text exactly as it does to typed, which is why the length
+above still matters.
 
 **Write the token to a file with `WriteAllText`, not through a pipe.** Piping appends a line
 ending — CRLF on Windows — and the stored secret then fails every comparison with a 401 that
@@ -86,7 +92,7 @@ gives no indication why.
 $bytes = [byte[]]::new(16)
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
 $TOKEN = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
-$TOKEN     # you type this into the watch later
+$TOKEN     # you paste this onto the watch later
 
 $tmp = Join-Path $env:TEMP "pc-proxy-token.txt"
 [System.IO.File]::WriteAllText($tmp, $TOKEN, [System.Text.UTF8Encoding]::new($false))
@@ -191,7 +197,7 @@ $URL
 ($URL -replace '^https://','').Length      # must fit your watch's picker
 ```
 
-You type the address **without** `https://` — the watch assumes it — so this is the number that
+You enter the address **without** `https://` — the watch assumes it — so this is the number that
 has to fit. A two-character service name on a classic `*.a.run.app` URL gives about 26, which
 fits even a 31-character picker.
 
@@ -201,7 +207,7 @@ picker (a fēnix 8 takes 256) that is simply fine, and you can stop here. On a 3
 map a short subdomain onto the service with `gcloud beta run domain-mappings create` and use
 that instead.
 
-There is no way to query a device's cap, so if you are unsure: type the address in, and if the
+There is no way to query a device's cap, so if you are unsure: paste the address in, and if the
 picker stops accepting characters part-way through, it is too long.
 
 ### 4. Verify it works
@@ -267,10 +273,13 @@ Expect:
 
 ### 5. Point the watch at it
 
-Playback hub → *Settings* → *Playback speed*, then *Server* and *Token*. With the phone in
-range the picker opens a keyboard on the phone, so both can be pasted.
+Playback hub → *Settings* → *Playback speed*, then *Server* and *Token*. **With the phone in
+range, focusing either field opens a text box and keyboard on the phone, and what you type or
+paste there lands on the watch as you go** — so both are a copy-paste from the machine you
+deployed from, with nothing spelled out on the watch. Without the phone it is the on-watch
+character wheel. Either way the picker stops at the device's cap (see step 1).
 
-Type the **hostname only** — `pc-a1b2c3d4e5-wl.a.run.app`, not `https://pc-…`. The scheme is
+Enter the **hostname only** — `pc-a1b2c3d4e5-wl.a.run.app`, not `https://pc-…`. The scheme is
 assumed. An explicit `http://` is honoured for a proxy on your own network, and trailing
 slashes are stripped. The 22-character token from step 1 fits the picker.
 

@@ -31,8 +31,9 @@ The app appears as a music source: **Music → sources → Pocket Casts (Unoffic
 entry point is the hub, and everything else hangs off it.
 
 1. **First run — sign in.** Anything reaching the app without working credentials lands on
-   the sign-in screen. With your phone in range the text picker opens a keyboard **on the
-   phone**; otherwise it is the on-watch character wheel. Email and password are kept in the
+   the sign-in screen. With your phone in range the text picker opens a text box and keyboard
+   **on the phone**, so the password can be pasted there rather than spelled out on the watch;
+   without the phone it is the on-watch character wheel. Email and password are kept in the
    watch's encrypted app storage.
 2. **Pick your playlists.** *Settings → Select playlists* fetches your playlists (Up Next
    pinned first, then manual playlists) and shows them as toggles. Ticking one means
@@ -82,16 +83,18 @@ chosen speed (1.0×, 1.25×, 1.5×, 1.75× or 2.0×) and quality (64k/96k mono o
 | Downloading episode audio | **Wi-Fi** — a known network in range |
 | Playback | nothing; it is all on the watch |
 
-Entering the proxy address and token needs the phone in range too — the text picker opens a
-keyboard on the phone. How much it accepts is up to the watch: a fēnix 7 stops at 31
-characters, a fēnix 8 takes 256. The setup instructions ask for a short hostname and a
-22-character token so that they fit either; if your watch has the roomier picker you are free
-to use longer ones, bearing in mind that every watch you set the proxy up on has to be able to
-type the same token.
+Entering the proxy address and token wants the phone in range too, and that is what makes it
+painless: the text picker opens a text box and keyboard **on the phone**, so both are a
+copy-paste and neither is spelled out on the watch.
+
+What the phone does not change is how much the field accepts — that cap belongs to the watch
+and applies to pasted text as much as typed. A fēnix 7 stops at 31 characters, a fēnix 8 takes
+256. The setup instructions ask for a short hostname and a 22-character token so that they fit
+either; if your watch has the roomier picker you are free to use longer ones, bearing in mind
+that every watch you set the proxy up on has to accept the same token.
 
 The address is entered without `https://` — the watch assumes it — so those eight characters
-never count against the limit. An explicit `http://` or `https://` is accepted too if you
-prefer to type it.
+never count against the limit. An explicit `http://` or `https://` is accepted too.
 
 ## Getting it onto a watch
 
