@@ -422,7 +422,8 @@ if (Test-Path $biPath) {
 
 Write-Host ''
 Write-Host "Deployed build $stampNow" -ForegroundColor Green
-Write-Host 'Now: unplug the watch and restart it by hand -' -ForegroundColor Cyan
-Write-Host 'it does not restart on unplug, and the app will not appear until it does.' -ForegroundColor Cyan
-Write-Host "Confirm on the watch: the playback menu's last row should read Build $stampNow." -ForegroundColor Cyan
+Write-Host 'Now: unplug the watch and open the app.' -ForegroundColor Cyan
+Write-Host "Confirm on the watch: the Settings menu's last row should read Build $stampNow." -ForegroundColor Cyan
+Write-Host 'If it names an older build, restart the watch by hand - a new .prg over a' -ForegroundColor Cyan
+Write-Host 'running one is not always picked up, and nothing over USB can trigger a restart.' -ForegroundColor Cyan
 Write-Host 'Afterwards:  .\tools\Deploy-Watch.ps1 -PullOnly' -ForegroundColor DarkGray

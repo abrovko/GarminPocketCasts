@@ -417,12 +417,15 @@ Sideloading, not the Connect IQ store - this app is not published there.
    nothing needs renaming or moving.
 3. Connect the watch by USB and copy that ``GARMIN`` folder onto the watch, merging it
    with the ``GARMIN`` folder already there when Windows asks.
-4. Unplug and **restart the watch by hand**. It does not restart on unplug, and the app
-   will not appear until it does.
+4. Unplug the watch. No restart is needed for a first install.
 5. It is an audio content provider, so it appears under **Music -> Music Providers**,
    not in the app list.
 
 Confirm what is running from the last row of Settings - it should read ``Build $ver``.
+
+**If you are upgrading and it still names the old build, restart the watch.** A new ``.prg``
+copied over an older one is not always picked up straight away - most likely when the previous
+version is still running. Restarting is the fix, and it is only ever needed in that case.
 
 The archive holds three files. Two of them look skippable and are worth keeping:
 
