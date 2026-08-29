@@ -28,9 +28,12 @@ class GarminPocketCastsConfigurePlaybackView extends WatchUi.Menu2 {
             addItem(new WatchUi.MenuItem(track.title, describe(track, positions), track.key, null));
         }
 
-        if (tracks.size() == 0) {
-            addItem(new WatchUi.MenuItem(Rez.Strings.nothingSynced, null, null, null));
-        }
+        // An empty list gets no placeholder row, deliberately. The two rows
+        // below already say what an empty hub means and what to do about it -
+        // Get new episodes IS the answer - where a dead row above them read
+        // as a fault: "Nothing synced" names the sync, and the everyday way
+        // to arrive here is a sync that worked perfectly and episodes that
+        // were then listened through.
 
         // The two non-episode rows, last so that everything above them is
         // something to play - this is the screen the listener lands on from

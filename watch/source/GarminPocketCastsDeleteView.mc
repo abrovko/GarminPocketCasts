@@ -32,7 +32,7 @@ class GarminPocketCastsDeleteView extends WatchUi.Menu2 {
         }
 
         if (tracks.size() == 0) {
-            addItem(new WatchUi.MenuItem(Rez.Strings.nothingSynced, null, null, null));
+            addItem(new WatchUi.MenuItem(Rez.Strings.noEpisodes, null, null, null));
         }
     }
 
