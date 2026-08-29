@@ -60,6 +60,26 @@ class GarminPocketCastsDeleteDelegate extends WatchUi.Menu2InputDelegate {
         System.println("delete: removing " + id);
         Catalog.removeDownload(id);
 
+        // And record that it was not wanted, or the next sync fetches it
+        // straight back - removeDownload() takes the audio, the ref id and the
+        // record, and getPendingTracks() works off the PLAYLISTS, which still
+        // list it. Deleting an episode and watching it return is not a delete.
+        //
+        // markFinished, deliberately NOT markPlayed. They are different
+        // claims: finished is local and means "not on this watch", while
+        // played tells the whole account you listened to it and changes the
+        // episode on every other device. Only the listener can say the second,
+        // and deleting something is often exactly the opposite statement.
+        Catalog.markFinished(id);
+
+        // And take it off Up Next, if that is where it came from. This is the
+        // half the user actually asked for - "delete" that leaves the episode
+        // queued on every other device is not a delete - and it is a claim
+        // about the QUEUE only. Still no markPlayed: removing something from a
+        // queue says you do not want it, where played says you listened to it,
+        // and deleting is often exactly the opposite statement.
+        Catalog.queueUpNextRemoval(id);
+
         // Rebuilt rather than repainted - a Menu2 cannot drop a row - and
         // switched rather than pushed, like every other view here, so there is
         // never a stale copy underneath.

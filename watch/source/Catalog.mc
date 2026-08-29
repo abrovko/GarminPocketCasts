@@ -108,6 +108,20 @@ module Catalog {
     const PLAYED_KEY = "played";          // Array<String> uuids FINISHED here, not yet reported
     const FINISHED_KEY = "finished";      // Array<String> uuids completed here; never re-downloaded
     const PURGE_KEY = "purge";            // Array<String> uuids whose audio is awaiting deletion
+    const UPNEXT_RM_KEY = "upnRm";        // Array<String> uuids to take OFF Up Next, not yet sent
+
+    // How many pending Up Next removals to remember. Same 8 KB value limit as
+    // MAX_FINISHED and the same trade: dropping the oldest leaves an episode
+    // sitting in the queue, which is untidy rather than broken - the finished
+    // guard still stops it being downloaded again. It only fills at all on a
+    // watch that has been away from a phone for a very long time, since every
+    // flush drains it.
+    const MAX_UPNEXT_REMOVALS = 50;
+
+    // How many "why is this not pending" lines one refresh may print. See
+    // logWhyNothingPending() - enough to explain a normal queue, bounded
+    // because the log rotates.
+    const MAX_SKIP_LOG = 8;
 
     // Delete an episode's audio once it has been listened to. A ~37 MB episode
     // is worth reclaiming, and a finished one is dead weight. Flip to false to
@@ -569,6 +583,12 @@ module Catalog {
 
         putIds(LISTS_KEY, ids);
 
+        // Strictly after LISTS_KEY: it reads the playlists back to decide what
+        // is still listed anywhere. A refresh is the only moment an episode
+        // can be observed to have left a playlist, which is the only thing
+        // that clears a finished marker.
+        pruneFinished();
+
         // Before the resequence, so what it re-lays is only what survives.
         reconcileDownloads();
 
@@ -833,29 +853,29 @@ module Catalog {
         var seen = {} as Dictionary<String, Boolean>;
         var wanted = [] as Array<String>;
 
+        // The finished guard applies to EVERY playlist, Up Next included.
+        //
+        // Up Next used to be exempt, on the reasoning that it is a deliberate
+        // queue rather than a standing collection: an episode put back on it
+        // after being finished here is a request to hear it again. That is
+        // still true, and it is now served by pruneFinished() instead - an
+        // episode has to LEAVE the queue and come back for its marker to
+        // clear, which is what "put back" actually means.
+        //
+        // The exemption was safe only if the server dropped a finished episode
+        // from Up Next, and measured 2026-08-29 it does not: `status: 3` sets
+        // the played flag and touches nothing else, so removal is the client's
+        // job. The only interim guard was refIds.hasKey() - still holding the
+        // audio - and auto-delete takes that away the moment the played report
+        // lands. So every episode finished from Up Next was fetched again, for
+        // ever: four episodes and ~140 MB in one measured run
+        // (logs/2026-08-29_091757). See tests/api/test_up_next_removal.py,
+        // which asks the API directly.
         for (var i = 0; i < selected.size(); i++) {
-            var listId = selected[i];
-
-            // Up Next is a deliberate queue, not a standing collection: an
-            // episode put back on it AFTER being finished here is a request to
-            // hear it again, so the "already listened to" guard does not
-            // apply. A manual playlist is different - it keeps listing what it
-            // always listed, which is not a fresh instruction, so there the
-            // guard stays and stops auto-delete and the next sync fighting
-            // each other forever.
-            //
-            // Order-independent: a finished episode skipped while walking a
-            // playlist is not added to `seen`, so Up Next still picks it up
-            // however the two happen to be ordered.
-            var honourFinished = !listId.equals(UP_NEXT_ID);
-
-            var episodes = getListEpisodeIds(listId);
+            var episodes = getListEpisodeIds(selected[i]);
             for (var j = 0; j < episodes.size(); j++) {
                 var uuid = episodes[j];
-                if (seen.hasKey(uuid) || refIds.hasKey(uuid)) {
-                    continue;
-                }
-                if (honourFinished && isFinished(uuid)) {
+                if (seen.hasKey(uuid) || refIds.hasKey(uuid) || isFinished(uuid)) {
                     continue;
                 }
                 seen.put(uuid, true);
@@ -1002,6 +1022,115 @@ module Catalog {
         putIds(DIRTY_KEY, ids);
     }
 
+    // --- taking an episode off Up Next ---
+    //
+    // A second outbox, alongside the position one and for the same reason: the
+    // moment an episode is finished is almost never a moment with a link, so
+    // the intention has to be banked and sent when one appears. Cleared only on
+    // a confirmed 200, so a flush that dies with the app is retried.
+    //
+    // It exists because **marking an episode played does NOT remove it from
+    // Up Next** - measured, see the section of that name in CLAUDE.md. The
+    // phone client is what removes it, so a watch that rarely sees a phone
+    // watches its queue grow forever. `Catalog.pruneFinished()` and the
+    // finished guard already stop that costing a re-download, but only up to
+    // MAX_FINISHED entries; past that the oldest marker falls off and the
+    // episode - still queued, no longer marked - is fetched again.
+    //
+    // The request shape is measured rather than guessed, and every field fits
+    // a 32-bit Number, which is why this is possible at all:
+    //
+    //   changes: [{ "action" => 4, "modified" => 0, "uuid" => <uuid> }]
+    //   upNext.serverModified => 0
+    //
+    // `modified: 0` is the safer value as well as the cheap one - it makes this
+    // change look maximally old, so a genuine re-queue from the phone wins.
+    function getUpNextRemovals() as Array<String> {
+        return getIds(UPNEXT_RM_KEY);
+    }
+
+    // Queue a removal, but only for an episode Up Next actually holds.
+    //
+    // The membership test lives here rather than at the call sites so that no
+    // caller can forget it. Without it, deleting an episode that only ever
+    // belonged to a manual playlist would send a pointless write against the
+    // user's queue - harmless, since the server would find nothing to remove,
+    // but this app writes to an account it does not own and every such write
+    // should be one that means something.
+    function queueUpNextRemoval(uuid as String) as Void {
+        if (getListEpisodeIds(UP_NEXT_ID).indexOf(uuid) < 0) {
+            return;
+        }
+        var ids = getUpNextRemovals();
+        if (ids.indexOf(uuid) >= 0) {
+            return;
+        }
+        ids.add(uuid);
+        while (ids.size() > MAX_UPNEXT_REMOVALS) {
+            ids = ids.slice(1, null);
+        }
+        System.println("catalog: queued " + uuid + " for removal from Up Next");
+        putIds(UPNEXT_RM_KEY, ids);
+    }
+
+    // Why getPendingTracks() came back empty, one line per episode.
+    //
+    // "Up to date" is the app's least explicable answer: the user can see an
+    // episode sitting in Up Next on their phone and the watch will not fetch
+    // it, with nothing in the log saying which guard turned it away. Every
+    // skip in getPendingTracks() is silent, which is right on the hot path -
+    // it runs several times per refresh - so the explanation lives here
+    // instead and is asked for once, at the moment the answer is given.
+    //
+    // Capped: this walks the selected playlists, which can hold MAX_EPISODES
+    // between them, and the log rotates.
+    function logWhyNothingPending() as Void {
+        var refIds = getRefIds();
+        var selected = getSelectedListsInOrder();
+        var shown = 0;
+
+        for (var i = 0; i < selected.size(); i++) {
+            var episodes = getListEpisodeIds(selected[i]);
+            for (var j = 0; j < episodes.size(); j++) {
+                if (shown >= MAX_SKIP_LOG) {
+                    System.println("catalog: ... and more not listed");
+                    return;
+                }
+                var uuid = episodes[j];
+                var why = "downloaded";
+                if (refIds.hasKey(uuid)) {
+                    why = "already held";
+                } else if (isFinished(uuid)) {
+                    // The interesting one, and the reason this exists: it has
+                    // been listened to here and has not left the queue since,
+                    // so it is not a fresh instruction. Taking it off Up Next
+                    // and putting it back is what makes it one.
+                    why = "FINISHED here";
+                }
+                System.println("catalog: not pending " + uuid.substring(0, 8) + " - " + why);
+                shown++;
+            }
+        }
+    }
+
+    // Whether a flush has anything at all to do. Both outboxes, because a
+    // finished episode with no position to report - the everyday case, since
+    // markPlayed() banks a status rather than a position - still has a queue
+    // removal waiting, and gating a flush on the position outbox alone would
+    // strand it until something else happened to need reporting.
+    function hasPendingReports() as Boolean {
+        return getDirtyKeys().size() > 0 || getUpNextRemovals().size() > 0;
+    }
+
+    function clearUpNextRemoval(uuid as String) as Void {
+        var ids = getUpNextRemovals();
+        if (ids.indexOf(uuid) < 0) {
+            return;
+        }
+        ids.remove(uuid);
+        putIds(UPNEXT_RM_KEY, ids);
+    }
+
     // Finishing an episode is reported as a STATUS, never as a position.
     //
     // A finished episode has no meaningful position - it is at the end - and
@@ -1027,6 +1156,11 @@ module Catalog {
         markDirty(uuid);
         markFinished(uuid);
 
+        // And ask the account to drop it from the queue. Reporting it played
+        // does not do that on its own, so without this the episode stays in
+        // Up Next until a phone tidies it - see getUpNextRemovals().
+        queueUpNextRemoval(uuid);
+
         if (AUTO_DELETE_PLAYED) {
             markForPurge(uuid);
 
@@ -1045,6 +1179,54 @@ module Catalog {
     // episode played removes it server-side.)
     function isFinished(uuid as String) as Boolean {
         return getIds(FINISHED_KEY).indexOf(uuid) >= 0;
+    }
+
+    // Forget that an episode was finished, once nothing lists it any more.
+    //
+    // This is what makes the finished guard safe to apply to Up Next. Re-
+    // queuing a finished episode still means "play it again" - it just has to
+    // actually LEAVE the queue and come back, rather than being re-offered by
+    // a queue it never left. An episode still sitting there finished is not a
+    // fresh instruction, and treating it as one is what re-downloaded ~140 MB.
+    //
+    // It walks every FETCHED playlist, not the selected ones: unticking a
+    // playlist must not clear its episodes' markers, or re-ticking it would
+    // fetch everything already listened to. A playlist that has genuinely gone
+    // from the account is out of LISTS_KEY by the time this runs, which is the
+    // case that should clear.
+    //
+    // A playlist this refresh could not fetch is carried forward with its
+    // `le<id>` untouched, so its episodes still read as present here and a
+    // failed fetch cannot be mistaken for an empty account. Same mechanism
+    // reconcileDownloads() relies on; do not tidy it into rewriting those keys.
+    function pruneFinished() as Void {
+        var finished = getIds(FINISHED_KEY);
+        if (finished.size() == 0) {
+            return;
+        }
+
+        var present = {} as Dictionary<String, Boolean>;
+        var listIds = getIds(LISTS_KEY);
+        for (var i = 0; i < listIds.size(); i++) {
+            var episodes = getListEpisodeIds(listIds[i]);
+            for (var j = 0; j < episodes.size(); j++) {
+                present.put(episodes[j], true);
+            }
+        }
+
+        var kept = [] as Array<String>;
+        for (var i = 0; i < finished.size(); i++) {
+            if (present.hasKey(finished[i])) {
+                kept.add(finished[i]);
+            }
+        }
+        if (kept.size() == finished.size()) {
+            return;
+        }
+
+        System.println("catalog: cleared " + (finished.size() - kept.size()) +
+            " finished marker(s) for episode(s) no longer in any playlist");
+        putIds(FINISHED_KEY, kept);
     }
 
     function markFinished(uuid as String) as Void {
@@ -1218,6 +1400,16 @@ module Catalog {
         var fromMenu = _syncFromMenu;
         _syncFromMenu = false;
         return fromMenu;
+    }
+
+    // The same flag without spending it, which is how a view that launched a
+    // sync can tell whether that sync is still in flight. It is set by
+    // SyncStarter.begin() and cleared by whichever of finishSync() and
+    // onStopSync() ends the session, so it goes false exactly once the sync
+    // delegate is done - see GarminPocketCastsRefreshView's rescue timer,
+    // which is the only caller and must not consume it.
+    function isSyncFromMenu() as Boolean {
+        return _syncFromMenu;
     }
 
     // Reclaim the audio of everything finished earlier, except whatever the

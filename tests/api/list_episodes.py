@@ -24,6 +24,71 @@ import sys
 from pcapi import PocketCasts
 
 
+STATUS_NAMES = {1: "unplayed", 2: "playing", 3: "PLAYED"}
+
+
+def episode_status(client, podcast, uuid, cache):
+    """This episode's real playingStatus, or None if it cannot be read.
+
+    NOT from /user/in_progress: that view only ever returns playingStatus 2,
+    so a played episode is absent from it and would read as "never started" -
+    which is exactly the state worth seeing when asking why the watch and the
+    phone disagree about Up Next. /user/podcast/episodes holds the record
+    itself. Defensive throughout: this is a diagnostic, and it must degrade to
+    "unknown" rather than fail the listing.
+    """
+    if podcast not in cache:
+        try:
+            response = client.podcast_episodes(podcast)
+            cache[podcast] = response.json() if response.status_code == 200 else None
+        except Exception:  # noqa: BLE001
+            cache[podcast] = None
+    body = cache[podcast]
+    if not body:
+        return None
+    for entry in body.get("episodes") or []:
+        if isinstance(entry, dict) and entry.get("uuid") == uuid:
+            return entry.get("playingStatus")
+    return None
+
+
+def print_up_next(client, body):
+    """Up Next exactly as the server has it, in queue order.
+
+    The candidate table below dedups across lists and sorts by usability, so
+    it cannot answer "what is actually queued, and in what order" - which is
+    the question you have when the watch and the phone disagree. This can.
+
+    A PLAYED entry still sitting here is the normal state, not a fault:
+    `status: 3` does not remove an episode from Up Next (see
+    test_up_next_removal.py), so it stays until a client removes it. The watch
+    will not re-download it - Catalog.pruneFinished() and the finished guard -
+    but nothing takes it off the queue yet.
+    """
+    episodes = [e for e in (body.get("episodes") or []) if isinstance(e, dict)]
+    print("")
+    print("UP NEXT on the server - " + str(len(episodes)) + " episode(s), in queue order")
+    print("-" * 128)
+    if not episodes:
+        print("  (empty)")
+        return
+
+    cache = {}
+    for index, entry in enumerate(episodes):
+        uuid = entry.get("uuid") or ""
+        podcast = entry.get("podcast") or ""
+        status = episode_status(client, podcast, uuid, cache) if uuid and podcast else None
+        print("%-4s %-9s %-38s %s" % (
+            str(index + 1) + ".",
+            STATUS_NAMES.get(status, "unknown"),
+            uuid,
+            (entry.get("title") or "(untitled)")[:60],
+        ))
+    print("")
+    print("PLAYED here is expected, not a fault: marking an episode played does not take it")
+    print("off Up Next. The watch will not fetch it again; nothing has removed it yet.")
+
+
 def main():
     email = os.environ.get("PC_EMAIL")
     password = os.environ.get("PC_PASSWORD")
@@ -61,6 +126,9 @@ def main():
               + str(total) + ". It is paging, so the round-trip test cannot conclude")
         print("      anything from an episode's absence there whichever one you pick.")
 
+    up_next_body = client.up_next().json()
+    print_up_next(client, up_next_body)
+
     candidates = []
     seen = set()
 
@@ -82,7 +150,7 @@ def main():
                 "readable": podcast in represented,
             })
 
-    collect("up next", client.up_next().json().get("episodes"), "uuid")
+    collect("up next", up_next_body.get("episodes"), "uuid")
     for playlist in client.playlists().json().get("playlists") or []:
         if isinstance(playlist, dict) and playlist.get("manual") and not playlist.get("isDeleted"):
             collect(playlist.get("title") or "playlist", playlist.get("episodes"), "episode")

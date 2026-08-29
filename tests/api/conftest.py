@@ -142,6 +142,23 @@ def shape(pytestconfig):
     return _shape
 
 
+# --- live output ---
+
+@pytest.fixture
+def say(capfd):
+    """Print to the real terminal while a test is still running.
+
+    pytest holds a test's stdout until it ends, so a test that waits on
+    purpose is indistinguishable from one that has hung - which is exactly
+    what happened here, and got a run killed at the two-minute mark. The
+    capture has to be suspended around each line for it to appear live.
+    """
+    def _say(message):
+        with capfd.disabled():
+            print(message, flush=True)
+    return _say
+
+
 # --- credentials and clients ---
 
 @pytest.fixture(scope="session")

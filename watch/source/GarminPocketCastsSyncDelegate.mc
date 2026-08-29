@@ -85,6 +85,13 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
     // only place that promise is kept.
     private var _bypassProxy as Boolean = false;
 
+    // Whether this session ended because it was cancelled rather than because
+    // it failed. It reaches exactly one decision - the sync-blocked flag in
+    // completeSync() - and it is there so that a user who stops a download is
+    // not also made to pay the automatic-retry suppression that a genuinely
+    // fruitless sync earns. "I don't want this now" is not "this cannot work".
+    private var _cancelled as Boolean = false;
+
     function initialize() {
         SyncDelegate.initialize();
     }
@@ -179,16 +186,59 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
     // The user abandoned the sync from the system's screen. Spend the flag but
     // do not act on it: a cancel is not a download to show off, and dropping
     // them back on the playlists they came from is what they asked for.
+    // Sync mode ending. NOT necessarily a cancel - see below.
+    //
+    // The log line goes FIRST, before every guard, because this used to leave
+    // no trace at all and that cost a diagnosis: a fenix 8 hang
+    // (logs/2026-08-29_091757) had to be reconstructed from a line that was
+    // MISSING - finishSync() not printing its landing. Anything that ends a
+    // sync has to say so.
+    //
+    // The first build that logged it answered a question the SDK docs frame as
+    // "the user cancelled": measured 2026-08-29 (logs/2026-08-29_110545), the
+    // system called getSyncDelegate() and then onStopSync() on a FRESH
+    // delegate immediately after a sync that had completed perfectly -
+    // "syncComplete ... error=null", the hub switched in, and then this. So
+    // treat it as "sync mode is going away" and nothing stronger. Both lines
+    // below stayed silent that time, which is how it should read: _finished
+    // was false because this instance never ran anything, and the flag was
+    // already spent by finishSync() a moment earlier.
     function onStopSync() as Void {
+        System.println(Log.stamp() + " onStopSync: sync mode ending");
         stopWatchdog();
         if (_finished) {
+            System.println("sync: already finished, nothing to cancel");
             return;
         }
         _finished = true;
+        _cancelled = true;
         Communications.cancelAllRequests();
         _queue = [] as Array<Track>;
         _current = null;
-        Catalog.takeSyncFromMenu();
+
+        // Reaching here means the sync ended without finishSync() having named
+        // a destination, and something still has to. Same reason finishSync()
+        // does it: the system's sync screen is drawn OVER whatever the app
+        // left underneath, and on the one-tap path that is the refresh spinner
+        // - a view which, having launched the sync, has no timer, no callback
+        // and no way to move itself. Spending the flag without acting on it
+        // left the user turning that spinner until they force-quit the app.
+        // The hub rather than the picker: stopping a sync is a change of mind,
+        // not a failure with something to report.
+        //
+        // This delegate is very often NOT the instance that ran the downloads
+        // - see the note above - which is exactly why the flag is module-level
+        // state on Catalog. Whichever instance gets here reads the same
+        // answer, and the first one to take it does the switch.
+        if (Catalog.takeSyncFromMenu()) {
+            System.println("sync: onStopSync landing on the playback hub");
+            WatchUi.switchToView(
+                new GarminPocketCastsConfigurePlaybackView(),
+                new GarminPocketCastsConfigurePlaybackDelegate(),
+                WatchUi.SLIDE_RIGHT
+            );
+        }
+
         Communications.notifySyncComplete(null);
     }
 
@@ -262,7 +312,7 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
             // one moment connectivity is guaranteed. Downloads come first
             // because they are what the user asked for; reporting positions is
             // bookkeeping and must never cost them an episode.
-            if (Catalog.getDirtyKeys().size() > 0 && _client == null) {
+            if (Catalog.hasPendingReports() && _client == null) {
                 var client = new PocketCastsClient(method(:onFlushDone));
                 _client = client;
                 markProgress();
@@ -300,8 +350,13 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
         // the order back.
         Catalog.resequenceDownloads();
 
+        // A cancelled sync is exempt: it made no progress by definition, and
+        // suppressing the next automatic retry would punish the user for
+        // stopping a download they did not want right then. The flag is for a
+        // sync that TRIED and got nowhere, which is the thing that would
+        // otherwise loop.
         var remaining = Catalog.getPendingTracks().size();
-        Catalog.setSyncBlocked(_total > 0 && remaining >= _total);
+        Catalog.setSyncBlocked(!_cancelled && _total > 0 && remaining >= _total);
 
         // Carry the reason forward so the sync menu can show it. A null
         // _error means the sync worked, which clears any stale message.
@@ -514,6 +569,34 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
         // How far it got before failing is the difference between "never
         // connected" and "the system killed a transfer that was working".
         System.println(Log.stamp() + " sync: FAILED code=" + responseCode + " after " + _bytes + " bytes");
+
+        // REQUEST_CANCELLED is not this download failing. It is the session
+        // being taken away underneath it - onStopSync() calling
+        // cancelAllRequests() - and the right answer is to stop, not to try
+        // harder.
+        //
+        // Treating it as a failure cost a fenix 8 two minutes of nothing
+        // (logs/2026-08-29_091757). The user cancelled seven seconds into a
+        // proxied download; -1003 came back; the fail-soft retry below read it
+        // as "the proxy is down" and issued a fresh FULL-SIZE direct GET into
+        // a session the system had already ended. Not one byte ever arrived,
+        // and the stall watchdog sat on it for 128 s before giving up. Note
+        // the _finished guard does not cover this: the cancel had landed on a
+        // different delegate instance, so this one's flag was still false.
+        //
+        // completeSync() rather than finishSync() directly - what did land is
+        // still worth resequencing, and a cancel must clear the stale sync
+        // error rather than leave one behind. _cancelled is what keeps it from
+        // also raising the sync-blocked flag.
+        if (responseCode == Communications.REQUEST_CANCELLED) {
+            System.println("sync: cancelled underneath us, stopping");
+            _cancelled = true;
+            _bypassProxy = false;
+            _queue = [] as Array<Track>;
+            _current = null;
+            completeSync();
+            return;
+        }
 
         // A proxied download that failed gets exactly one retry straight from
         // the podcast CDN, at full size and normal speed.

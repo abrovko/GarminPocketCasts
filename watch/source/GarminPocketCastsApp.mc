@@ -27,7 +27,29 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
     // "am I even running the build I just copied?" has cost real debugging
     // time here.
     function onStart(state as Dictionary?) as Void {
-        System.println(Log.stamp() + " build " + BuildInfo.STAMP);
+        // WHICH watch, as well as which build. Two devices run this app and
+        // their logs land in the same logs/ tree, so a log with no device in
+        // it is a guess - and the two do not behave identically (the fenix 8
+        // falls back to the launcher icon for the now-playing ring where the
+        // fenix 7 does not, and TextPicker caps entry at 256 characters
+        // against the fenix 7's 31).
+        //
+        // partNumber rather than uniqueIdentifier: the question is which MODEL
+        // produced the log, not which installation, and uniqueIdentifier is 40
+        // characters of hash on a log with a rotation limit.
+        //
+        // It shares its BASE with the software_part_number in ERR_LOG.txt but
+        // is not the same string - measured on one fenix 8 51mm, this reports
+        // 006-B4536-00 where the crash log says 006-B4536-10. Match on
+        // 006-B4536 and treat the suffix as a revision, not an identity.
+        //
+        // It rides on the existing build line rather than taking one of its
+        // own, for that same 5 KB reason. All 57 products in manifest.xml
+        // declare partNumber; guarded anyway, per getContentRefIter - the
+        // check is free and the export build cannot catch its absence.
+        var settings = System.getDeviceSettings();
+        var part = (settings has :partNumber) ? settings.partNumber : "?";
+        System.println(Log.stamp() + " build " + BuildInfo.STAMP + " on " + part);
 
         // Pick up a proxy address or token typed on the phone. Same reasoning
         // as the purge below: this cannot live only here, because onStart()

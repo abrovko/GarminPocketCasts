@@ -206,19 +206,7 @@ def assert_body_is_empty(response, what):
     )
 
 
-@pytest.fixture
-def say(capfd):
-    """Print to the real terminal while a test is still running.
-
-    pytest holds a test's stdout until it ends, so a test that waits on
-    purpose is indistinguishable from one that has hung - which is exactly
-    what happened here, and got a run killed at the two-minute mark. The
-    capture has to be suspended around each line for it to appear live.
-    """
-    def _say(message):
-        with capfd.disabled():
-            print(message, flush=True)
-    return _say
+# `say` lives in conftest.py - test_up_next_removal.py waits on purpose too.
 
 
 @pytest.fixture
@@ -414,10 +402,16 @@ def test_played_is_reported_as_a_status(api, restored):
     """
     podcast, uuid, _original = restored
 
+    # It does NOT also remove the episode from Up Next - that was believed here
+    # and is false, measured 2026-08-29 by test_up_next_removal.py. Removing
+    # from the queue needs an entry in /up_next/sync's `changes` array, which
+    # is the client's job. What status=3 buys is the played flag, which is what
+    # stops other devices offering the episode as unfinished.
     response = api.update_episode(uuid, podcast, status=PLAYED)
     assert response.status_code == 200, (
-        "status=3 now returns " + str(response.status_code) + " - marking an episode finished "
-        "is how it leaves Up Next and stops being re-downloaded"
+        "status=3 now returns " + str(response.status_code) + " - this is how the watch "
+        "reports a finished episode, and its stored position of 0 must never be sent as a "
+        "position instead"
     )
     assert_body_is_empty(response, "status=3")
     print("update_episode: after status=3, " + server_state(api, podcast, uuid))

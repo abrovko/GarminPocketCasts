@@ -6,6 +6,8 @@ watch's code would be a shared assumption rather than a verified one - the
 request bodies below are written out in full for exactly that reason.
 """
 
+import time
+
 import requests
 
 API_BASE = "https://api.pocketcasts.com"
@@ -60,6 +62,45 @@ class PocketCasts:
                 "deviceTime": 0,
                 "version": "2",
                 "upNext": {"serverModified": 0, "changes": []},
+            },
+        )
+
+    # WRITES, and the only call in this suite that can damage the account
+    # structurally rather than just move a position. Only
+    # test_up_next_changes.py calls it, and only under --mutating.
+    #
+    # Same endpoint as up_next() above - the difference IS the changes array,
+    # which is the whole point. The shape comes from the official Android
+    # client's UpNextSyncRequest.Change:
+    #
+    #   {action: Int, modified: Long, uuid: String?, title: String?,
+    #    url: String?, published: String?, podcast: String?,
+    #    episodes: List<ChangeEpisode>?}
+    #
+    # and the actions from UpNextChange's companion object: PLAY_NOW 1,
+    # PLAY_NEXT 2, PLAY_LAST 3, REMOVE 4, REPLACE 5. Written out here rather
+    # than imported from anywhere, like the rest of this file - a shape shared
+    # with the code under test is an assumption, not a measurement.
+    #
+    # serverModified is echoed back from a prior pull rather than hardcoded to
+    # 0: this is a two-way sync and 0 means "I have seen nothing", which is a
+    # different claim when you are also sending changes.
+    def up_next_sync(self, changes, server_modified=0, device_time=None):
+        return self.post(
+            "/up_next/sync",
+            {
+                "deviceTime": int(time.time() * 1000) if device_time is None else device_time,
+                "version": "2",
+                "upNext": {
+                    # Passed through verbatim, NOT coerced. The response
+                    # delivers serverModified as a String while the official
+                    # client models it as a Long, and whether the server will
+                    # accept the string form back is exactly what one of the
+                    # candidate shapes is asking - a cast here would answer it
+                    # for the test instead of measuring it.
+                    "serverModified": server_modified,
+                    "changes": changes,
+                },
             },
         )
 

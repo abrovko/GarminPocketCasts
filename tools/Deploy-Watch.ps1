@@ -375,7 +375,14 @@ $logs   = Get-MtpFolder $apps 'LOGS' -Create
 $debug  = Get-MtpFolder $garmin 'Debug'
 
 # --- pull logs first: they describe the run that just happened ---------------
+# The watch's own name goes in the folder name. Two devices run this app and
+# their pulls used to land in an indistinguishable logs\<timestamp>\, so
+# working out which watch a log came from meant remembering what was plugged in
+# that morning. The app stamps its part number into the log itself as well -
+# this is the half that is readable without opening anything.
+$slug    = ($watch.Name -replace '[^A-Za-z0-9]+', '-').Trim('-')
 $stamp   = Get-Date -Format 'yyyy-MM-dd_HHmmss'
+if ($slug) { $stamp = "${stamp}_$slug" }
 $pullDir = Join-Path $LogPullRoot $stamp
 Write-Step "Pulling logs -> logs\$stamp"
 $pulled = 0

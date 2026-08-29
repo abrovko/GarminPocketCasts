@@ -40,9 +40,29 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
     // reproduced on the watch.
     static const SWITCH_DELAY_MS = 250;
 
+    // How often the rescue timer looks at whether this spinner is still on
+    // screen after the sync it launched has ended. See armRescue().
+    static const RESCUE_TICK_MS = 2000;
+
+    // How many ticks to let pass after the sync ends before judging what is on
+    // screen. finishSync() switches the view and THEN calls
+    // notifySyncComplete(), so for a moment after the flag clears the system's
+    // sync screen is still up and getCurrentView() is answering about a screen
+    // that is on its way out.
+    static const RESCUE_SETTLE_TICKS = 2;
+
+    // How many times to try. If the switch works the next tick sees a
+    // different view and stops, so a second attempt only ever happens when
+    // switches are being dropped - and a rescue that retries forever would
+    // build a menu every two seconds for as long as the app lived.
+    static const MAX_RESCUE_ATTEMPTS = 3;
+
     private var _client as PocketCastsClient?;
     private var _timer as Timer.Timer?;
     private var _switchTimer as Timer.Timer?;
+    private var _rescueTimer as Timer.Timer?;
+    private var _settled as Number = 0;
+    private var _attempts as Number = 0;
     private var _message as String?;
     private var _finished as Boolean = false;
 
@@ -181,6 +201,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         if (_autoSync && _message == null && Catalog.shouldSync()) {
             System.println("refresh: auto-syncing");
             SyncStarter.begin();
+            armRescue();
             return;
         }
 
@@ -200,6 +221,10 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         if (_autoSync && _message == null && !Catalog.hasPendingDownloads() &&
                 Catalog.getSelectedLists().size() > 0) {
             System.println("refresh: nothing new, up to date");
+            // The one answer the user cannot check for themselves. They can
+            // see the episode in Up Next on their phone; this says which guard
+            // turned it away.
+            Catalog.logWhyNothingPending();
             Hub.showUpToDate();
             return;
         }
@@ -212,6 +237,99 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         WatchUi.switchToView(
             new GarminPocketCastsConfigureSyncView(_message),
             new GarminPocketCastsConfigureSyncDelegate(),
+            WatchUi.SLIDE_LEFT
+        );
+    }
+
+    // The way off this spinner when the sync's own switch never arrives.
+    //
+    // Launching a sync is the one branch of onSwitchToMenu() that leaves this
+    // view on screen deliberately: the system draws its sync screen over it,
+    // and GarminPocketCastsSyncDelegate.finishSync() puts the playback hub
+    // underneath before that screen comes down. By then finishOnce() has
+    // stopped the watchdog, stopped the switch timer and dropped the client,
+    // so that one cross-mode switchToView() is the ONLY thing left that can
+    // move this view - and if it is lost the spinner turns until the app is
+    // force-quit, with the sync having succeeded.
+    //
+    // Which is what happened on a fenix 7X (logs/2026-08-29_070047): four
+    // episodes downloaded cleanly, "sync: landing on the playback hub" logged,
+    // the hub built - and then the next back press was answered by
+    // GarminPocketCastsRefreshDelegate, i.e. this view was still the live one.
+    // A second switch, from that onBack, was lost the same way. It is not
+    // every device or every sync: the same route works on a fenix 8, and the
+    // fenix 7X runs where it worked all show a second hub built straight after
+    // finishSync's, which is the system relaunching playback configuration
+    // mode on its own and landing the user on a hub whatever we did.
+    //
+    // So this does not replace that switch, it backstops it: if this view is
+    // still on screen once the sync is over, go to the hub. Built here rather
+    // than before the sync on purpose - it is a Menu2 and will not redraw, so
+    // a hub constructed on the way in would list the episodes as they stood
+    // before the download.
+    private function armRescue() as Void {
+        _settled = 0;
+        _attempts = 0;
+        var timer = new Timer.Timer();
+        timer.start(method(:onRescueTick), RESCUE_TICK_MS, true);
+        _rescueTimer = timer;
+    }
+
+    // Nulled as well as stopped: the timer holds a Method bound back to this
+    // view, so leaving the field set is a reference cycle, and Monkey C is
+    // reference counted.
+    private function stopRescue() as Void {
+        var timer = _rescueTimer;
+        _rescueTimer = null;
+        if (timer != null) {
+            timer.stop();
+        }
+    }
+
+    function onRescueTick() as Void {
+        // Still syncing. Whether a timer in this invocation runs at all while
+        // sync mode is up is not confirmed on hardware - if it does not, this
+        // simply starts ticking when the app comes back, which is the moment
+        // that matters. Either way nothing is judged until the sync delegate
+        // has ended the session.
+        //
+        // The flag never clearing is the case where the watch silently drops
+        // startSync() and no sync mode ever comes up. That is left alone: it
+        // is a device-state fault with its own diagnosis, and the spinner is
+        // no worse off than before this timer existed.
+        if (Catalog.isSyncFromMenu()) {
+            _settled = 0;
+            return;
+        }
+
+        _settled++;
+        if (_settled < RESCUE_SETTLE_TICKS) {
+            return;
+        }
+
+        // Identity, not type: if the user has since started ANOTHER refresh,
+        // the current view is a different GarminPocketCastsRefreshView and
+        // switching away from it would kill a fetch that is still running.
+        // A null answer means the question could not be answered, which is not
+        // grounds to stand down - the whole point is that this view can be on
+        // screen when nothing thinks it is.
+        if (WatchUi has :getCurrentView) {
+            var current = WatchUi.getCurrentView()[0];
+            if (current != null && !current.equals(self)) {
+                System.println("refresh: sync landed, spinner already gone");
+                stopRescue();
+                return;
+            }
+        }
+
+        _attempts++;
+        System.println("refresh: still on the spinner after sync, attempt " + _attempts);
+        if (_attempts >= MAX_RESCUE_ATTEMPTS) {
+            stopRescue();
+        }
+        WatchUi.switchToView(
+            new GarminPocketCastsConfigurePlaybackView(),
+            new GarminPocketCastsConfigurePlaybackDelegate(),
             WatchUi.SLIDE_LEFT
         );
     }

@@ -53,7 +53,10 @@ if (-not $env:PC_EMAIL -or -not $env:PC_PASSWORD) {
     Write-Warning "PC_EMAIL / PC_PASSWORD are not set - everything that needs an account will skip."
 }
 if ($Mutating -and -not $env:PC_TEST_EPISODE_UUID) {
-    Write-Warning "PC_TEST_EPISODE_UUID is not set - the mutating tests will skip anyway."
+    Write-Warning "PC_TEST_EPISODE_UUID is not set - the update_episode tests will skip. The Up Next removal test does not use it; it aims at the last entry in the real queue."
+}
+if ($Mutating) {
+    Write-Warning "-Mutating marks a real Up Next entry played to find out whether that removes it. If it does, nothing here can put it back - see test_up_next_removal.py."
 }
 
 if ($ListEpisodes) {
@@ -71,7 +74,8 @@ $command = 'pip install -q --disable-pip-version-check -r requirements.txt && ' 
 & docker run --rm `
     -v "${here}:/w" -w /w `
     -e PC_EMAIL -e PC_PASSWORD -e PC_TEST_EPISODE_UUID -e PC_TEST_PODCAST_UUID `
-    -e PC_ROUND_TRIP_SECONDS `
+    -e PC_ROUND_TRIP_SECONDS -e PC_TEST_UPNEXT_UUID -e PC_UP_NEXT_SECONDS -e PC_UP_NEXT_NO_RESTORE `
+    -e PC_TEST_UPNEXT_REMOVE_UUID -e PC_TEST_UPNEXT_SHAPE `
     python:3.12-slim sh -c $command
 
 exit $LASTEXITCODE

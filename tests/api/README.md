@@ -45,6 +45,8 @@ cd tests/api && python -m pytest
 | `POST /user/in_progress` | entries carry `playedUpTo` and `duration`; **everything returned is `playingStatus: 2`**; **`total` matches what came back**, i.e. it is the whole list and not a page |
 | `GET /mobile/podcast/findbyepisode/…` | works with **no token**; answers with exactly one episode; stays small; **its declared `file_type` agrees with what `encodingForUrl()` sniffs off the playlist url** |
 | `POST /sync/update_episode` | **position alone is recorded but leaves `playingStatus` untouched; `status` is what makes it stick**, and separately whether a stored position comes back from `/user/in_progress` — `--mutating` only |
+| `POST /sync/update_episode` → `/up_next/sync` | **whether marking an episode played takes it off Up Next** — it does not; the phone client is what removes it. `test_up_next_removal.py`; its first test is read-only |
+| `POST /up_next/sync` with `changes` | **whether an explicit REMOVE works, and in what shape** — the one thing that would let the watch empty its own queue. `test_up_next_changes.py`, `--mutating` and opt-in only |
 
 Each test's docstring says what breaks in the app if the assumption fails. That is the point of
 them: a red test should name the consequence, not just the field.
@@ -56,6 +58,35 @@ would ADD, REMOVE or REORDER the real queue if anything were ever put in its `ch
 the suite's first up-next test exists to confirm the empty array is inert. `/sync/update_episode`
 writes playback position and played status outright, so every test that calls it is marked
 `mutating` and deselected unless `--mutating` is passed.
+
+**One mutating test is not fully reversible, and it is the newest one.**
+`test_up_next_removal.py` marks a real Up Next entry played to find out whether that is what
+removes it from the queue. If the answer turns out to be yes, *this suite cannot put it back* —
+adding to Up Next needs an entry in `/up_next/sync`'s `changes` array, whose format nothing in
+this repo knows. It restores the played status, reports whether the queue entry came back with
+it, and names the episode to re-queue by hand if it did not. It aims at the **last** entry in
+the queue for that reason; `PC_TEST_UPNEXT_UUID` overrides the choice and `PC_UP_NEXT_SECONDS`
+the 90-second window.
+
+Its first test is read-only and runs on every plain run: an episode the server already
+considers played that is *still* sitting in Up Next settles the question with no write at all,
+and on a busy account that is the likely outcome.
+
+**`test_up_next_changes.py` is the most dangerous thing in this directory.** It puts an entry
+in `/up_next/sync`'s `changes` array, which is the field that ADDs, REMOVEs and REPLACEs the
+real queue — a wrong shape does not fail cleanly, it rearranges. It is therefore the only test
+that will not choose a target for you: `PC_TEST_UPNEXT_REMOVE_UUID` must name the episode, and
+without it the test skips. It prints the whole queue before sending anything, compares the
+queue after every attempt, and **stops the moment anything changes that was not the requested
+removal** rather than trying the next shape. It then tries to put the episode back with
+`PLAY_LAST`, which appends — so an episode removed from the middle comes back at the end, and
+the test says so.
+
+The shape is not guessed: it is the official Android client's `UpNextSyncRequest.Change`
+(`{action, modified, uuid, title, url, published, podcast, episodes}`) with the action values
+from `UpNextChange` — `PLAY_NOW 1, PLAY_NEXT 2, PLAY_LAST 3, REMOVE 4, REPLACE 5`. What is
+actually under test is whether the **web-player scope** honours it and whether `serverModified`
+has to be a real value from a prior pull rather than the `0` the watch sends on a read.
 
 To run those you need an episode to aim them at. `-ListEpisodes` finds one — it logs in, lists
 everything in Up Next and your manual playlists, marks which episodes the server already

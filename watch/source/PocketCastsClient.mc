@@ -33,6 +33,14 @@ class PocketCastsClient {
     // another selectable playlist, pinned to the top.
     static const UP_NEXT_TITLE = "Up Next";
 
+    // From the official Android client's UpNextChange: PLAY_NOW 1,
+    // PLAY_NEXT 2, PLAY_LAST 3, REMOVE 4, REPLACE 5. Only REMOVE is ever sent
+    // from here - the others are named in tests/api/test_up_next_changes.py,
+    // where the shape was verified against the live account before any of this
+    // was written. REPLACE in particular rewrites the queue wholesale and must
+    // never be reached by accident.
+    static const UP_NEXT_ACTION_REMOVE = 4;
+
     // The Up Next endpoint wants a version string; the official client's
     // SYNC_API_VERSION is 2. Confirmed working against a live account.
     static const SYNC_API_VERSION = "2";
@@ -99,6 +107,11 @@ class PocketCastsClient {
     // Episodes whose position still has to be reported. Entries leave only
     // when the server confirms.
     private var _dirty as Array<String> = [] as Array<String>;
+
+    // Episodes to take off Up Next. Same contract as _dirty: loaded from
+    // Storage at the start of a flush or a refresh's push stage, drained one
+    // request at a time, and cleared only on a confirmed 200.
+    private var _removals as Array<String> = [] as Array<String>;
 
     // The episodes, and - parallel to them - the podcast each one belongs to.
     // The podcast uuids are only needed while the refresh is running, so they
@@ -661,10 +674,71 @@ class PocketCastsClient {
         // first clears the dirty flag on anything the server has already
         // beaten, so only genuinely-ahead positions survive to be pushed.
         _dirty = Catalog.getDirtyKeys();
-        if (_dirty.size() > 0) {
-            System.println("pc: pushing " + _dirty.size() + " position(s)");
+        _removals = Catalog.getUpNextRemovals();
+
+        // Only here, never in flushPositions(): this is the one path with a
+        // pull behind it, and the pull is the freshest word on what the queue
+        // actually holds. Before the count is printed, so the log says what
+        // will be sent rather than what was banked.
+        dropRemovalsAlreadyGone();
+
+        if (_dirty.size() > 0 || _removals.size() > 0) {
+            System.println("pc: pushing " + _dirty.size() + " position(s), "
+                + _removals.size() + " up_next removal(s)");
         }
         pushNext();
+    }
+
+    // Forget removals the account has already applied.
+    //
+    // A REMOVE for an episode the queue does not hold is harmless - the server
+    // finds nothing and answers 200 - but this app writes to an account it
+    // does not own, and a write that means nothing should not be sent. The
+    // everyday case is the listener opening Pocket Casts on their phone before
+    // the watch next finds a link: the phone tidies the queue, and the watch
+    // arrives with an instruction that has already been carried out.
+    //
+    // It does NOT close the re-queue race, and cannot. An episode deliberately
+    // put back on the queue after being finished here is simply *present*, and
+    // so is one nobody ever touched - the watch has no way to tell them apart,
+    // and dropping the removal whenever the episode is present would disable
+    // the feature entirely. `modified: 0` remains the only mitigation there.
+    private function dropRemovalsAlreadyGone() as Void {
+        var queued = fetchedUpNextIds();
+        if (queued == null) {
+            // No fetched Up Next this time round - either the queue's own
+            // fetch failed and it is carried as stale, or Up Next is not among
+            // the lists. Either way this refresh knows nothing about what the
+            // queue holds, and silence is not evidence of absence.
+            return;
+        }
+
+        var keep = [] as Array<String>;
+        for (var i = 0; i < _removals.size(); i++) {
+            var uuid = _removals[i];
+            if (queued.indexOf(uuid) >= 0) {
+                keep.add(uuid);
+                continue;
+            }
+            System.println("pc: up_next " + uuid + " already gone, dropping the removal");
+            Catalog.clearUpNextRemoval(uuid);
+        }
+        _removals = keep;
+    }
+
+    // The uuids Up Next came back with on THIS refresh, or null if it did not
+    // come back at all. Read from _lists rather than Storage deliberately -
+    // Storage still holds the previous fetch until commit() runs, which is
+    // after the push, so it would answer the older question.
+    private function fetchedUpNextIds() as Array<String>? {
+        for (var i = 0; i < _lists.size(); i++) {
+            var id = _lists[i].get("i");
+            if (id instanceof String && id.equals(Catalog.UP_NEXT_ID)) {
+                var episodes = _lists[i].get("e");
+                return (episodes instanceof Array) ? episodes as Array<String> : null;
+            }
+        }
+        return null;
     }
 
     // --- reporting positions back to the service ---
@@ -674,9 +748,11 @@ class PocketCastsClient {
     function flushPositions() as Void {
         _flushing = true;
         _dirty = Catalog.getDirtyKeys();
-        System.println("pc: flush " + _dirty.size() + " position(s)");
+        _removals = Catalog.getUpNextRemovals();
+        System.println("pc: flush " + _dirty.size() + " position(s), "
+            + _removals.size() + " up_next removal(s)");
 
-        if (_dirty.size() == 0) {
+        if (_dirty.size() == 0 && _removals.size() == 0) {
             finish(true, null);
             return;
         }
@@ -692,13 +768,9 @@ class PocketCastsClient {
 
     private function pushNext() as Void {
         if (_dirty.size() == 0) {
-            if (_flushing) {
-                System.println("pc: flush done");
-                finish(true, null);
-            } else {
-                // Mid-refresh: carry on to naming the podcasts and committing.
-                resolvePodcastNext();
-            }
+            // Positions are done; the queue removals go next, and they share
+            // both tails - see removeNext().
+            removeNext();
             return;
         }
 
@@ -792,6 +864,101 @@ class PocketCastsClient {
         Catalog.clearPlayed(_dirty[0]);
         _dirty = _dirty.slice(1, null);
         pushNext();
+    }
+
+    // --- taking finished episodes off Up Next ---
+
+    // The second outbox, drained after the positions and sharing both of
+    // pushNext()'s tails so a flush and a refresh each end where they did
+    // before.
+    //
+    // One request per episode rather than one batch, even though `changes` is
+    // an array and would take them all. The outbox almost never holds more
+    // than one - episodes are finished one at a time - and per-entry
+    // confirmation is what lets an entry be cleared only when the server has
+    // actually taken it. A batch answers with a single code for the lot, so a
+    // partial failure would either re-send removals the server already applied
+    // or drop ones it never did.
+    private function removeNext() as Void {
+        if (_removals.size() == 0) {
+            if (_flushing) {
+                System.println("pc: flush done");
+                finish(true, null);
+            } else {
+                // Mid-refresh: carry on to naming the podcasts and committing.
+                resolvePodcastNext();
+            }
+            return;
+        }
+
+        var uuid = _removals[0];
+        System.println("pc: up_next remove " + uuid);
+
+        // serverModified 0 and modified 0, both measured rather than assumed.
+        // 0 is what this client already sends on a pull, and it keeps every
+        // value inside a 32-bit Number - epoch milliseconds does not fit one,
+        // and a real timestamp would have meant Lang.Long plus an unanswered
+        // question about whether makeWebRequest encodes it. It is also the
+        // safer value: a change stamped 0 looks maximally old, so a genuine
+        // re-queue from the phone wins.
+        Communications.makeWebRequest(
+            API_BASE + "/up_next/sync",
+            {
+                "deviceTime" => System.getTimer(),
+                "version" => SYNC_API_VERSION,
+                "upNext" => {
+                    "serverModified" => 0,
+                    "changes" => [
+                        {
+                            "action" => UP_NEXT_ACTION_REMOVE,
+                            "modified" => 0,
+                            "uuid" => uuid
+                        }
+                    ] as Array<PersistableType>
+                }
+            },
+            {
+                :method => Communications.HTTP_REQUEST_METHOD_POST,
+                :headers => {
+                    "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON,
+                    "Authorization" => "Bearer " + tokenHeader()
+                },
+                :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+            },
+            method(:onRemoved)
+        );
+    }
+
+    // Cleared ONLY on a confirmed 200, exactly like a position push: a request
+    // that never gets a reply stays queued and goes again next time.
+    //
+    // The failure policy is the same too, and for the same reason. A flush
+    // reports the failure, because reporting is all a flush was for. A refresh
+    // abandons the outbox and carries on, because the user came here to pick
+    // episodes and must not lose that to a tidy-up - the entries are untouched
+    // in Storage and are retried at the next opportunity.
+    function onRemoved(
+        responseCode as Number,
+        data as Dictionary or String or Toybox.PersistedContent.Iterator or Null
+    ) as Void {
+        if (_removals.size() == 0) {
+            return;
+        }
+
+        if (responseCode != 200) {
+            System.println("pc: up_next remove failed " + responseCode);
+            if (_flushing) {
+                finish(false, describeError(responseCode));
+            } else {
+                _removals = [] as Array<String>;
+                resolvePodcastNext();
+            }
+            return;
+        }
+
+        Catalog.clearUpNextRemoval(_removals[0]);
+        _removals = _removals.slice(1, null);
+        removeNext();
     }
 
     // --- naming the podcasts ---
