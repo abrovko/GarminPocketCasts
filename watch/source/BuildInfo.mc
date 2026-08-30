@@ -13,5 +13,5 @@ import Toybox.Lang;
 // app invocation, and shown as the last row of the playback hub. Deploying
 // prints the same value, so the two can be compared without pulling logs.
 module BuildInfo {
-    const STAMP = "260830-154229";
+    const STAMP = "260830-163320";
 }

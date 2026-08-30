@@ -60,7 +60,6 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
     private var _client as PocketCastsClient?;
     private var _timer as Timer.Timer?;
     private var _switchTimer as Timer.Timer?;
-    private var _rescueTimer as Timer.Timer?;
     private var _settled as Number = 0;
     private var _attempts as Number = 0;
     private var _message as String?;
@@ -93,6 +92,12 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         // Scope the "we already launched a sync" flag to this refresh, so
         // backing out of a LATER spinner still cancels its requests.
         SyncStarter.clearForRefresh();
+
+        // This spinner supersedes any earlier one, so a rescue armed for a view
+        // that is no longer on screen has nothing left to rescue. See the
+        // Rescue module: left running it is a recurring timer against a dead
+        // view, and the timer budget is three.
+        Rescue.cancel();
 
         var timer = new Timer.Timer();
         timer.start(method(:onTimeout), TIMEOUT_MS, false);
@@ -312,20 +317,12 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
     private function armRescue() as Void {
         _settled = 0;
         _attempts = 0;
+        // Cancel before constructing, not after: two live timers for the sake
+        // of tidiness is a third of the budget.
+        Rescue.cancel();
         var timer = new Timer.Timer();
         timer.start(method(:onRescueTick), RESCUE_TICK_MS, true);
-        _rescueTimer = timer;
-    }
-
-    // Nulled as well as stopped: the timer holds a Method bound back to this
-    // view, so leaving the field set is a reference cycle, and Monkey C is
-    // reference counted.
-    private function stopRescue() as Void {
-        var timer = _rescueTimer;
-        _rescueTimer = null;
-        if (timer != null) {
-            timer.stop();
-        }
+        Rescue.hold(timer);
     }
 
     function onRescueTick() as Void {
@@ -359,7 +356,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
             var current = WatchUi.getCurrentView()[0];
             if (current != null && !current.equals(self)) {
                 System.println("refresh: sync landed, spinner already gone");
-                stopRescue();
+                Rescue.cancel();
                 return;
             }
         }
@@ -367,13 +364,55 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         _attempts++;
         System.println("refresh: still on the spinner after sync, attempt " + _attempts);
         if (_attempts >= MAX_RESCUE_ATTEMPTS) {
-            stopRescue();
+            Rescue.cancel();
         }
         // _staleMsg rather than SyncStarter.takeStatus(): this hub REPLACES the
         // one finishSync() built and could not switch in, and finishSync spent
         // the status building it. This view has held the same reason all along,
         // so the rescue hub says what the lost one would have.
         Nav.hubStatus(_staleMsg, WatchUi.SLIDE_LEFT);
+    }
+
+}
+
+// The one rescue timer the process may have, and the only reference to it.
+//
+// It is recurring and it outlives the view that armed it: every config view is
+// switched away from rather than popped, and nothing in a ProgressBar's
+// lifecycle reports that - onShow is never dispatched to this view (there is no
+// "refresh: onShow" in any device log), so onHide cannot be relied on either.
+// Held here rather than in a member so there can only ever be ONE, and so
+// GarminPocketCastsRefreshDelegate can stop it.
+//
+// A member was the original shape and it cost a crash. When the watch silently
+// drops startSync() - see "Device-state false alarms" - no sync mode ever comes
+// up, so Catalog._syncFromMenu never clears, onRescueTick() early-returns
+// forever, and the stand-down inside it was the only way to stop the timer.
+// Every retry of "Get new episodes" armed another one. Read off a fenix 8
+// (logs/2026-08-30_161208_fenix-8-51mm): three leaked rescues, then the sync
+// the watch finally accepted reached onStartSync, startWatchdog() asked for a
+// fourth Timer, and the app died with "Too Many Timers Error" before issuing a
+// single request. Three concurrent timers is the whole budget on that device.
+//
+// In memory only, like SyncStarter's flags: a claim about what THIS process
+// has running.
+module Rescue {
+
+    var _timer as Timer.Timer?;
+
+    function hold(timer as Timer.Timer) as Void {
+        _timer = timer;
+    }
+
+    // Nulled as well as stopped: the timer holds a Method bound back to the
+    // view that armed it, so leaving the field set is a reference cycle and
+    // Monkey C is reference counted.
+    function cancel() as Void {
+        var timer = _timer;
+        _timer = null;
+        if (timer != null) {
+            timer.stop();
+        }
     }
 
 }
@@ -405,6 +444,12 @@ class GarminPocketCastsRefreshDelegate extends WatchUi.BehaviorDelegate {
     // which reads exactly like a sync that failed for no reason. The fetch is
     // finished by then anyway; there is nothing left to abandon.
     function onBack() as Boolean {
+        // Whatever the rescue would have done, this press has just done - it
+        // goes to the same hub. Left armed it is a recurring timer ticking
+        // against a view nobody can see, which is how the timer budget was
+        // exhausted. See the Rescue module.
+        Rescue.cancel();
+
         if (SyncStarter.launched()) {
             System.println("refresh: back during sync launch, leaving it running");
         } else {
