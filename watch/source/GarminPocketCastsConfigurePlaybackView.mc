@@ -49,17 +49,38 @@ class GarminPocketCastsConfigurePlaybackView extends WatchUi.Menu2 {
     }
 
     // Report that a one-tap refresh found nothing to download.
-    //
-    // It goes on the Get new episodes row - the one the user pressed, so the
-    // answer appears where the question was asked - and the focus moves there
-    // with it. Without that the message is the last row of a menu that opens
-    // at the first, i.e. below however many episodes are downloaded, which on
-    // a watch screen means invisible.
-    //
-    // Only ever set on a hub built for this purpose. Every other route builds
-    // a plain one, so the message cannot survive to a visit where it would be
-    // a lie.
     function showUpToDate() as Void {
+        markGetRow(Rez.Strings.upToDate);
+    }
+
+    // Report that a one-tap refresh could not check.
+    //
+    // A playlist whose own fetch failed is carried forward verbatim, so the
+    // refresh "succeeds" without the watch ever seeing that playlist's current
+    // contents - and "Up to date" would then be a claim about a list nobody
+    // read. This says which link was missing instead.
+    //
+    // The same row as showUpToDate() on purpose: the two are the possible
+    // answers to one question and belong in one place. A toast is the immediate
+    // signal but is absent on several products in this manifest (see
+    // Nav.upToDate) and is gone within seconds on the rest, so the row is the
+    // half that every device gets and the user can still read.
+    function showStatus(message as String) as Void {
+        markGetRow(message);
+    }
+
+    // The Get new episodes row answers whatever a one-tap refresh concluded: it
+    // is the row the user pressed, so the reply appears where the question was
+    // asked.
+    //
+    // The focus move is not decoration. Without it the message is the last row
+    // of a menu that opens at the first, i.e. below however many episodes are
+    // downloaded, which on a watch screen means invisible.
+    //
+    // Only ever called on a hub built for the purpose. Every other route builds
+    // a plain one, so a message cannot survive to a visit where it would be a
+    // lie.
+    private function markGetRow(label as String or ResourceId) as Void {
         var index = findItemById(GET_ID);
         if (index < 0) {
             return;
@@ -68,7 +89,7 @@ class GarminPocketCastsConfigurePlaybackView extends WatchUi.Menu2 {
         if (item == null) {
             return;
         }
-        item.setSubLabel(Rez.Strings.upToDate);
+        item.setSubLabel(label);
         setFocus(index);
     }
 

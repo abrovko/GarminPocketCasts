@@ -100,6 +100,14 @@ class PocketCastsClient {
     private var _retriedAuth as Boolean = false;
     private var _token as String?;
 
+    // Why a list was carried forward stale this refresh, or null. Set when
+    // /up_next/sync OR /user/playlist/list fails a way that is worth retrying -
+    // a transport blip, not a list that genuinely cannot be loaded. The
+    // refresh still finishes "successfully": the stored copy is carried
+    // forward. GarminPocketCastsRefreshView reads this via staleReason() and
+    // turns it into a toast instead of a false "Up to date".
+    private var _staleReason as String?;
+
     // What this instance was asked to do, so onLogin knows where to resume
     // after acquiring a token. One instance does one job.
     private var _flushing as Boolean = false;
@@ -153,6 +161,7 @@ class PocketCastsClient {
         _lists = [] as Array<Dictionary<String, PersistableType>>;
         _podcastQueue = [] as Array<Array<String>>;
         _staleLists = [] as Array<String>;
+        _staleReason = null;
 
         var token = Auth.getToken();
         System.println("pc: refresh, cached token=" + (token != null));
@@ -217,6 +226,7 @@ class PocketCastsClient {
         } else {
             System.println("pc: up_next failed " + responseCode + ", carrying the stored queue forward");
             _staleLists.add(Catalog.UP_NEXT_ID);
+            noteStale(responseCode);
         }
 
         requestPlaylists();
@@ -336,25 +346,51 @@ class PocketCastsClient {
             }
         }
 
-        if (responseCode != 200 || !(data instanceof Dictionary)) {
-            System.println("pc: playlist/list failed " + responseCode);
+        if (responseCode == 200) {
+            var playlists = null;
+            if (data instanceof Dictionary) {
+                playlists = data.get("playlists");
+            }
+            if (!(playlists instanceof Array)) {
+                // A 200 with no playlists array is the API shape having moved,
+                // not a blip - carrying a stale copy forward would hide it.
+                // Fail loud, to the picker.
+                finish(false, "No playlists in reply");
+                return;
+            }
+
+            collectPlaylists(playlists as Array<Object?>);
+
+            System.println("pc: " + _lists.size() + " list(s), " + _records.size() +
+                " episode(s), " + _podcastQueue.size() + " podcast(s)");
+
+            // Pull server-side progress before committing, so an episode played
+            // on the phone resumes in the right place here.
+            requestInProgress();
+            return;
+        }
+
+        System.println("pc: playlist/list failed " + responseCode);
+
+        // Fail hard to the picker - not a transient blip, so the user needs to
+        // see it - for:
+        //   - a list too large for the response buffer or the heap: a retry or
+        //     a carry-forward will not fix it
+        //   - a 401/403 that survived the one re-login above: auth is broken,
+        //     not the link
+        if (responseCode == Communications.NETWORK_RESPONSE_TOO_LARGE ||
+                responseCode == Communications.NETWORK_RESPONSE_OUT_OF_MEMORY ||
+                responseCode == 401 || responseCode == 403) {
             finish(false, describeError(responseCode));
             return;
         }
 
-        var playlists = data.get("playlists");
-        if (!(playlists instanceof Array)) {
-            finish(false, "No playlists in reply");
-            return;
-        }
-
-        collectPlaylists(playlists as Array<Object?>);
-
-        System.println("pc: " + _lists.size() + " list(s), " + _records.size() +
-            " episode(s), " + _podcastQueue.size() + " podcast(s)");
-
-        // Pull server-side progress before committing, so an episode played on
-        // the phone resumes in the right place here.
+        // Anything else is a transport blip (no phone link, timeout, 5xx).
+        // Treat the manual playlists exactly like a stale Up Next: carry the
+        // stored copy forward and report it softly. commit() still runs, so the
+        // fresh Up Next (if it fetched) is not thrown away with them.
+        carryStoredPlaylistsForward();
+        noteStale(responseCode);
         requestInProgress();
     }
 
@@ -1207,6 +1243,39 @@ class PocketCastsClient {
             return Media.ENCODING_WAV;
         }
         return Media.ENCODING_MP3;
+    }
+
+    // Record why a list is being carried forward instead of refreshed. First
+    // reason wins: /up_next/sync is fetched before the playlists and they share
+    // one BLE pipe, so if both blip the earlier failure names it well enough.
+    private function noteStale(responseCode as Number) as Void {
+        if (_staleReason == null) {
+            _staleReason = describeError(responseCode);
+        }
+    }
+
+    // Carry every stored manual playlist forward untouched - the same treatment
+    // a failed /up_next/sync already gets. To the user, Up Next and a manual
+    // playlist are both just lists, so "Up Next refreshed, playlists didn't"
+    // should land exactly where "playlists refreshed, Up Next didn't" does.
+    // setCatalog()'s stale mechanism carries any id, not just Up Next's.
+    private function carryStoredPlaylistsForward() as Void {
+        var stored = Catalog.getListIds();
+        for (var i = 0; i < stored.size(); i++) {
+            var id = stored[i];
+            if (id.equals(Catalog.UP_NEXT_ID) || _staleLists.indexOf(id) >= 0) {
+                continue;
+            }
+            _staleLists.add(id);
+            System.println("pc: carrying stored playlist " + id + " forward");
+        }
+    }
+
+    // Why a list was carried forward stale this refresh, or null. Read by
+    // GarminPocketCastsRefreshView after the callback, before this client is
+    // dropped.
+    function staleReason() as String? {
+        return _staleReason;
     }
 
     private function describeError(responseCode as Number) as String {

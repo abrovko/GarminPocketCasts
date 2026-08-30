@@ -41,7 +41,9 @@ entry point is the hub, and everything else hangs off it.
    the same explicitly.
 3. **Every day after that — one tap.** *Get new episodes* on the hub refreshes and syncs in
    one go, landing on the episodes it just downloaded. Nothing new gets you *Up to date*
-   rather than a screen full of toggles.
+   rather than a screen full of toggles. If a playlist could not be fetched — no phone in
+   range, usually — that row says so instead (*No phone link*): the watch keeps the copy it
+   already had, and does not claim to be up to date about a list it could not read.
 4. **Listen.** The hub lists downloaded episodes; a started one reads `23m left — Podcast
    Name`. Pick one to play. Finished episodes leave the list, and their audio is reclaimed at
    the next non-playback entry into the app.

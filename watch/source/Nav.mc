@@ -72,6 +72,34 @@ module Nav {
         }
     }
 
+    // The hub, reporting that a refresh could NOT answer the question - a
+    // playlist was carried forward stale, so there is no honest "Up to date" to
+    // give. Same shape as upToDate() above, and same reason for saying it
+    // twice: the row works on every device and lasts as long as the user stays
+    // on the screen, the toast is the immediate signal and is guarded.
+    //
+    // The hub rather than the picker deliberately. The message is the whole of
+    // what the picker had to offer here - the fetch is not something a screen
+    // of toggles can fix - and answering "anything new?" with a playlist menu
+    // is the friction the one-tap path exists to remove.
+    // A null message is the ordinary case and gives a plain hub, identical to
+    // hub() above. That is deliberate: every caller reaches here holding a
+    // String? it did not choose - the sync delegate spends
+    // SyncStarter.takeStatus() whether or not the refresh behind it had
+    // anything to report - and a null test at each of them is four chances to
+    // get one wrong for no gain.
+    function hubStatus(message as String?, transition as WatchUi.SlideType) as Void {
+        var view = new GarminPocketCastsConfigurePlaybackView();
+        if (message != null) {
+            view.showStatus(message);
+        }
+        WatchUi.switchToView(view, new GarminPocketCastsConfigurePlaybackDelegate(), transition);
+
+        if (message != null && WatchUi has :showToast) {
+            WatchUi.showToast(message, null);
+        }
+    }
+
     // Everything the listener does NOT do every day.
     function settings(transition as WatchUi.SlideType) as Void {
         WatchUi.switchToView(

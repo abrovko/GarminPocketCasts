@@ -29,11 +29,48 @@ module SyncStarter {
         return _launched;
     }
 
-    // Called when a refresh starts, so the flag only ever describes that
-    // refresh. Without it the first sync of the process would disarm the
-    // cancel for every later spinner, including one that is genuinely stuck.
-    function clearLaunched() as Void {
+    // What the hub should say when this sync lands, or null.
+    //
+    // It carries the reason a playlist was refreshed stale (see
+    // PocketCastsClient.staleReason()) from the refresh that launched the sync
+    // to the hub that GarminPocketCastsSyncDelegate.finishSync() builds
+    // afterwards. That hub is the only durable place to say it: the refresh
+    // spinner is covered by the system's sync screen about a second after
+    // begin() returns, so a toast fired here is gone before anyone reads it,
+    // and the sync delegate has no other way of knowing a list was carried
+    // forward.
+    //
+    // In memory only, for the same reason as _launched and
+    // Catalog._syncFromMenu: it is a claim about what THIS process is doing
+    // now. A copy in Storage would survive to caption a later sync that had
+    // nothing wrong with it.
+    //
+    // ASSIGNED BY EVERY begin(), never conditionally, so it can never describe
+    // an earlier one. Spent by whichever of finishSync()/onStopSync() ends the
+    // session, alongside Catalog.takeSyncFromMenu().
+    var _status as String?;
+
+    function takeStatus() as String? {
+        var status = _status;
+        _status = null;
+        return status;
+    }
+
+    // Called when a refresh starts, so that neither field can outlive the
+    // refresh it describes.
+    //
+    // _launched: without clearing it here the first sync of the process would
+    // disarm the cancel for every later spinner, including one that is
+    // genuinely stuck.
+    //
+    // _status: belt-and-braces, since every begin() assigns it - but a sync the
+    // watch silently drops (see "Device-state false alarms" - startSync()
+    // returns, onStartSync never arrives) reaches no finishSync() and no
+    // onStopSync(), so nothing spends it. This is the only thing that would
+    // clear it before it captioned an unrelated sync.
+    function clearForRefresh() as Void {
         _launched = false;
+        _status = null;
     }
 
     // Start sync mode, with something other than the app name on the system's
@@ -55,13 +92,18 @@ module SyncStarter {
     // device list is NOT all of them - fenix 5 Plus, fenix 6, Forerunner
     // 645/745/945 and vivoactive 3/4 among others are absent - so it is
     // guarded and falls back to the plain call.
-    function begin() as Void {
+    // `status` is what the hub this sync lands on should say, or null for the
+    // usual case of nothing to report. See _status: only the refresh view ever
+    // has anything to pass, and it is the reason a playlist was carried
+    // forward stale.
+    function begin(status as String?) as Void {
         // Tell the sync delegate there is a view of ours underneath the
         // system's sync screen, so it can put the playback hub there before
         // the screen comes down. Without this the user lands back on whatever
         // they started the sync from and has to back out by hand.
         Catalog.setSyncFromMenu(true);
         _launched = true;
+        _status = status;
 
         if (Communications has :startSync2) {
             var message = syncMessage();

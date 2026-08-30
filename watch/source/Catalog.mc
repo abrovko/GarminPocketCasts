@@ -494,13 +494,15 @@ module Catalog {
     // carried forward verbatim - keys, episodes, position in the menu and the
     // user's tick - rather than being treated as deleted.
     //
-    // Only /up_next/sync can fail and still reach here; a failed
-    // /user/playlist/list abandons the whole refresh. But a transient BLE
-    // failure there is common and the consequence was not obvious: Up Next
-    // simply was not in `lists`, so the prune below dropped it from LISTS_KEY
-    // and, with it, from selLists. Read off a device log as "pc: up_next failed
-    // -2", then "committing 1 list(s)", then "selectedLists=0" - the user had
-    // to notice their queue had silently unticked itself and tick it again.
+    // Either fetch can fail and still reach here: /up_next/sync carries the
+    // stored queue forward, and a transport failure on /user/playlist/list
+    // carries every stored manual playlist forward the same way (a list too
+    // large to load still aborts hard). Without `stale` the consequence was not
+    // obvious: a carried-forward playlist is simply not in `lists`, so the
+    // prune below dropped it from LISTS_KEY and, with it, from selLists. Read
+    // off a device log as "pc: up_next failed -2", then "committing 1 list(s)",
+    // then "selectedLists=0" - the user had to notice their queue had silently
+    // unticked itself and tick it again.
     function setCatalog(
         lists as Array<Dictionary<String, PersistableType>>,
         records as Array<Dictionary<String, PersistableType>>,

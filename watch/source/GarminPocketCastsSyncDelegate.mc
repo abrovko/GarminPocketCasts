@@ -227,9 +227,14 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
         // - see the note above - which is exactly why the flag is module-level
         // state on Catalog. Whichever instance gets here reads the same
         // answer, and the first one to take it does the switch.
+        // takeStatus() alongside takeSyncFromMenu(), and read even when there
+        // is nothing to say: a cancelled sync still leaves the hub as the
+        // place the refresh behind it would have reported a stale playlist,
+        // and that fact did not stop being true because the download was
+        // stopped.
         if (Catalog.takeSyncFromMenu()) {
             System.println("sync: onStopSync landing on the playback hub");
-            Nav.hub(WatchUi.SLIDE_RIGHT);
+            Nav.hubStatus(SyncStarter.takeStatus(), WatchUi.SLIDE_RIGHT);
         }
 
         Communications.notifySyncComplete(null);
@@ -267,13 +272,34 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
         _finished = true;
 
         if (Catalog.takeSyncFromMenu()) {
+            // Spent here whichever way this goes, so a message meant for one
+            // sync's hub cannot survive to caption the next one. The failure
+            // branch below deliberately does not show it: the picker has one
+            // status slot and the sync error is the more urgent claim on it.
+            //
+            // INSIDE the takeSyncFromMenu() guard, and it must stay there.
+            // cancelAllRequests() in onStopSync() delivers the download
+            // callback synchronously, on the OTHER delegate instance, which
+            // reaches here and takes the flag before the onStopSync that
+            // caused it tests its own - measured, see "onStopSync arrives on a
+            // second delegate". Either function can end up being the one that
+            // switches. Hoisted above the guard, the loser of that race would
+            // empty the status and the winner would build a blank hub.
+            var status = SyncStarter.takeStatus();
+
             if (error == null) {
                 // What they came for: the episodes, freshly resequenced and
                 // including whatever just landed. The hub is built HERE, after
                 // the downloads, which is the whole reason this cannot be done
                 // by switching the view before the sync starts.
-                System.println("sync: landing on the playback hub");
-                Nav.hub(WatchUi.SLIDE_RIGHT);
+                //
+                // It is also the one durable place to report a playlist that
+                // was carried forward stale. The refresh that launched this
+                // sync knew, but its spinner was covered by the system's sync
+                // screen a second later; this hub is what the user is actually
+                // left looking at.
+                System.println("sync: landing on the playback hub, status=" + status);
+                Nav.hubStatus(status, WatchUi.SLIDE_RIGHT);
             } else {
                 // A REBUILT playlists menu, not the stale one underneath. That one
                 // was constructed before the sync and cannot redraw itself, so

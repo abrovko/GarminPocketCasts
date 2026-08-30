@@ -66,6 +66,12 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
     private var _message as String?;
     private var _finished as Boolean = false;
 
+    // The reason a list was carried forward stale this refresh
+    // (PocketCastsClient.staleReason()), or null. Captured off the client in
+    // onRefreshDone() before finishOnce() drops it. Turned into a toast rather
+    // than a false "Up to date" - see onSwitchToMenu().
+    private var _staleMsg as String?;
+
     // Whether to go straight on into a sync when the refresh answers, instead
     // of showing the picker. True for the hub's "Get new episodes", which is
     // the everyday route and should be one tap; false for the deliberate trip
@@ -86,7 +92,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
 
         // Scope the "we already launched a sync" flag to this refresh, so
         // backing out of a LATER spinner still cancels its requests.
-        SyncStarter.clearLaunched();
+        SyncStarter.clearForRefresh();
 
         var timer = new Timer.Timer();
         timer.start(method(:onTimeout), TIMEOUT_MS, false);
@@ -107,6 +113,12 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
     // Called by PocketCastsClient, once.
     function onRefreshDone(success as Boolean, message as String?) as Void {
         System.println("refresh: done success=" + success + " msg=" + message);
+        // Captured before finishOnce() drops the client. Meaningful only on a
+        // success (message == null); a hard failure has its own message.
+        var client = _client;
+        if (client != null) {
+            _staleMsg = client.staleReason();
+        }
         finishOnce(message);
     }
 
@@ -150,12 +162,9 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         }
 
         // Breaks the view <-> client cycle. Monkey C is reference counted; a
-        // cycle is never collected.
-        //
-        // The null test is NOT redundant, however much it looks it: it is the
-        // only READ of _client anywhere, and a field whose entire job is to
-        // hold a reference alive is otherwise "not used" as far as the
-        // compiler is concerned. Dropping it costs a warning at -w -l 3.
+        // cycle is never collected. Dropped here rather than in
+        // onRefreshDone(), which reads the client for its staleReason() on the
+        // way past and must run first.
         if (_client != null) {
             _client = null;
         }
@@ -205,8 +214,19 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         // retry after a fruitless sync falls through to the picker instead of
         // silently doing nothing.
         if (happyRefresh && Catalog.shouldSync()) {
-            System.println("refresh: auto-syncing");
-            SyncStarter.begin();
+            // A stale list here means something DID refresh and has episodes to
+            // fetch while something else was carried forward. Sync what we
+            // have, and hand the reason to SyncStarter so it reaches the hub
+            // finishSync() builds on the way out.
+            //
+            // Reporting it HERE is what does not work, and was tried: this view
+            // is covered by the system's sync screen about a second after
+            // begin() returns, so a toast is gone before it can be read and
+            // there is no row on a ProgressBar to write it down on. The landing
+            // hub is the first screen the user is left looking at.
+            System.println("refresh: auto-syncing" +
+                (_staleMsg != null ? " (a list was carried stale: " + _staleMsg + ")" : ""));
+            SyncStarter.begin(_staleMsg);
             armRescue();
             return;
         }
@@ -226,6 +246,23 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         // exactly that suppression.
         if (happyRefresh && !Catalog.hasPendingDownloads() &&
                 Catalog.getSelectedLists().size() > 0) {
+            var stale = _staleMsg;
+            if (stale != null) {
+                // NOT "Up to date": a list could not be fetched, so the watch
+                // never saw its current contents and cannot claim there is
+                // nothing new in it. The hub says which link was missing on the
+                // Get new episodes row instead - the row that was pressed, and
+                // the half of the answer that reaches every device.
+                //
+                // This is also where a refresh that fetched NOTHING lands (both
+                // calls blipped, everything carried forward), which is the
+                // everyday no-phone case. That used to fail hard to the picker;
+                // a screen of toggles fixes nothing about a missing phone, and
+                // the message it was carrying is now on the hub.
+                System.println("refresh: nothing new to sync, a list was carried stale: " + stale);
+                Nav.hubStatus(stale, WatchUi.SLIDE_RIGHT);
+                return;
+            }
             System.println("refresh: nothing new, up to date");
             // The one answer the user cannot check for themselves. They can
             // see the episode in Up Next on their phone; this says which guard
@@ -239,8 +276,11 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         // somewhere to explain itself: a failed fetch shows its reason, a
         // suppressed retry shows Sync failed and Download now, and a first run
         // shows the toggles the user has not ticked yet.
-        System.println("refresh: switching to menu, msg=" + _message);
-        Nav.picker(_message, WatchUi.SLIDE_LEFT);
+        System.println("refresh: switching to menu, msg=" + _message + " staleMsg=" + _staleMsg);
+        // A first run or a nothing-ticked refresh with a stale list still has
+        // no _message; carry the stale reason onto the picker's Refresh row so
+        // that route explains itself too.
+        Nav.picker(_message != null ? _message : _staleMsg, WatchUi.SLIDE_LEFT);
     }
 
     // The way off this spinner when the sync's own switch never arrives.
@@ -329,7 +369,11 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         if (_attempts >= MAX_RESCUE_ATTEMPTS) {
             stopRescue();
         }
-        Nav.hub(WatchUi.SLIDE_LEFT);
+        // _staleMsg rather than SyncStarter.takeStatus(): this hub REPLACES the
+        // one finishSync() built and could not switch in, and finishSync spent
+        // the status building it. This view has held the same reason all along,
+        // so the rescue hub says what the lost one would have.
+        Nav.hubStatus(_staleMsg, WatchUi.SLIDE_LEFT);
     }
 
 }

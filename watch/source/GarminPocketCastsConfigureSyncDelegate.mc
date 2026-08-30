@@ -34,7 +34,11 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
             System.println("onSelect: download now");
             Catalog.setSyncBlocked(false);
             Catalog.setSyncError(null);
-            SyncStarter.begin();
+            // No status for the landing hub. A refresh that carried a playlist
+            // forward stale already said so on this menu's Refresh playlists
+            // row, which the user has been looking at - repeating it on the hub
+            // afterwards would report a fetch they did not just ask for.
+            SyncStarter.begin(null);
             return;
         }
 
@@ -88,7 +92,9 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
         }
 
         if (Catalog.shouldSync()) {
-            SyncStarter.begin();
+            // Nothing to report on the hub, for the same reason as the
+            // Download now row above: this menu was the screen showing it.
+            SyncStarter.begin(null);
             return;
         }
 
