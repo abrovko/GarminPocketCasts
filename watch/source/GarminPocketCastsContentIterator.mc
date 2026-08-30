@@ -46,8 +46,7 @@ class GarminPocketCastsContentIterator extends Media.ContentIterator {
         // What the player will be holding, published so purgeFinished() can
         // keep its hands off it - deleting the cache entry of a Content the
         // player has in hand is the move that rebooted the watch in rule 2.
-        var held = [] as Array<String>;
-        _keys = held;
+        _keys = [] as Array<String>;
 
         for (var i = 0; i < tracks.size(); i++) {
             var track = tracks[i];
@@ -57,13 +56,6 @@ class GarminPocketCastsContentIterator extends Media.ContentIterator {
             }
 
             var contentRef = new Media.ContentRef(refId as Object, Media.CONTENT_TYPE_AUDIO);
-
-            var metadata = new Media.ContentMetadata();
-            metadata.title = track.title;
-            metadata.artist = track.artist;
-            metadata.album = Catalog.ALBUM;
-            metadata.genre = Catalog.GENRE;
-            metadata.trackNumber = i + 1;
 
             var cached = Media.getCachedContentObj(contentRef) as Media.Content?;
             if (cached != null) {
@@ -113,12 +105,20 @@ class GarminPocketCastsContentIterator extends Media.ContentIterator {
                 _contents.add(playable);
             } else {
                 System.println("track " + i + " (" + track.key + ") CACHE MISS, building, ref=" + refId);
+                // Only the cache-miss path needs a metadata object we built -
+                // the common path mutates the one the system already owns.
+                var metadata = new Media.ContentMetadata();
+                metadata.title = track.title;
+                metadata.artist = track.artist;
+                metadata.album = Catalog.ALBUM;
+                metadata.genre = Catalog.GENRE;
+                metadata.trackNumber = i + 1;
                 _contents.add(new Media.Content(contentRef, metadata));
             }
-            held.add(track.key);
+            _keys.add(track.key);
         }
 
-        Catalog.setPlayerKeys(held);
+        Catalog.setPlayerKeys(_keys);
 
         if (startIndex >= 0 && startIndex < _contents.size()) {
             _index = startIndex;
@@ -280,14 +280,13 @@ class GarminPocketCastsContentIterator extends Media.ContentIterator {
         return profile;
     }
 
-    // Floored at 5 seconds: at the top of the offered range a 10 second
-    // backward skip scales to 5, and anything shorter stops being a control
-    // and starts being a twitch.
+    // A skip delta is content seconds - a 30s tap moves 30s of episode - so it
+    // crosses into file seconds by exactly the same conversion a stored
+    // position does. Floored at 5 seconds: at the top of the offered range a
+    // 10 second backward skip scales to 5, and anything shorter stops being a
+    // control and starts being a twitch.
     private function scaleSkip(seconds as Number, percent as Number) as Number {
-        if (percent == 100) {
-            return seconds;
-        }
-        var scaled = (seconds * 100) / percent;
+        var scaled = Catalog.toFileSeconds(percent, seconds);
         return scaled < 5 ? 5 : scaled;
     }
 

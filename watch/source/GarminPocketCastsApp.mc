@@ -51,26 +51,20 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
         var part = (settings has :partNumber) ? settings.partNumber : "?";
         System.println(Log.stamp() + " build " + BuildInfo.STAMP + " on " + part);
 
-        // Reclaim the audio of episodes finished during an earlier invocation.
-        // Here rather than at SONG_EVENT_COMPLETE on purpose: onStart() runs
-        // before any content iterator exists, so nothing is holding the media
-        // objects being deleted.
+        // Reclaim the audio of episodes finished during an earlier invocation,
+        // and any audio no ref id points at any more. Here rather than at
+        // SONG_EVENT_COMPLETE on purpose: onStart() runs before any content
+        // iterator exists, so nothing is holding the media objects being
+        // deleted.
         //
         // NOT only here, though. onStart() fires once per PROCESS, and the
         // process outlives the mode: a device log covering playback, refresh,
         // sync, playback and another refresh carried exactly one "build" line,
         // so an episode finished during it was never purged at all. Every
-        // non-playback entry point below tries again.
-        Catalog.purgeFinished();
-
-        // And reclaim any audio that has no ref id pointing at it at all -
-        // the failure purgeFinished() cannot see, because it works through
-        // the same refIds a lost reference is missing from. Rate-limited to
-        // once a day inside Catalog, so this and the three calls below cost a
-        // single Storage read on all but one entry per day. AFTER the purge:
-        // that is what puts the cache and refIds back in step first, so
-        // nothing it just deleted is counted twice.
-        Catalog.reclaimOrphans(false);
+        // non-playback entry point below calls reclaimIdleAudio() too; the
+        // orphan sweep inside it is rate-limited to once a day, so the repeat
+        // calls cost a single Storage read.
+        Catalog.reclaimIdleAudio();
     }
 
     // onStop() is called when your application is exiting
@@ -107,10 +101,9 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
 
     // Get a delegate that communicates sync status to the system for syncing media content to the device
     function getSyncDelegate() as Communications.SyncDelegate? {
-        Catalog.purgeFinished();
         // Safe here: getSyncDelegate() is called BEFORE onStartSync(), so no
         // download is in flight and no ref id is waiting to be written.
-        Catalog.reclaimOrphans(false);
+        Catalog.reclaimIdleAudio();
         return new GarminPocketCastsSyncDelegate();
     }
 
@@ -119,8 +112,7 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
         // Before the menu is built, so a finished episode's row is gone the
         // first time the user comes back to the hub rather than the time
         // after. The menu is a Menu2 and will not redraw itself.
-        Catalog.purgeFinished();
-        Catalog.reclaimOrphans(false);
+        Catalog.reclaimIdleAudio();
         var view = new GarminPocketCastsConfigurePlaybackView();
         return [ view, new GarminPocketCastsConfigurePlaybackDelegate() ];
     }
@@ -157,8 +149,7 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
     // so they have to be fetched before it is constructed. The refresh view
     // switches the menu in when the API answers - or when it does not.
     function getSyncConfigurationView() as [Views] or [Views, InputDelegates] {
-        Catalog.purgeFinished();
-        Catalog.reclaimOrphans(false);
+        Catalog.reclaimIdleAudio();
         var view = new GarminPocketCastsRefreshView(false);
         return [ view, new GarminPocketCastsRefreshDelegate() ];
     }

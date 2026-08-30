@@ -435,7 +435,7 @@ class PocketCastsClient {
 
         _lists.add({
             "i" => id,
-            "t" => trim(title),
+            "t" => clampTitle(title),
             "e" => ids
         } as Dictionary<String, PersistableType>);
     }
@@ -486,7 +486,7 @@ class PocketCastsClient {
         _records.add(Catalog.makeRecord(
             uuid,
             url,
-            trim(title),
+            clampTitle(title),
             UNKNOWN_ARTIST,
             encodingForUrl(url, firstString(entry, "fileType", "file_type")),
             podcastUuid,
@@ -1001,7 +1001,7 @@ class PocketCastsClient {
             if (podcast instanceof Dictionary) {
                 var title = getString(podcast, "title");
                 if (title.length() > 0) {
-                    applyPodcastTitle(podcastUuid, trim(title));
+                    applyPodcastTitle(podcastUuid, clampTitle(title));
                 }
             }
 
@@ -1135,7 +1135,11 @@ class PocketCastsClient {
         Catalog.setDuration(uuid, length);
     }
 
-    private function trim(text as String) as String {
+    // Cap a title at MAX_TITLE characters. NOT the same as Auth.trim(), which
+    // strips whitespace - this only ever shortens, and the menu row and track
+    // metadata both truncate long before this anyway; it is here to keep
+    // Storage small.
+    private function clampTitle(text as String) as String {
         if (text.length() <= MAX_TITLE) {
             return text;
         }

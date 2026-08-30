@@ -91,9 +91,7 @@ class GarminPocketCastsContentDelegate extends Media.ContentDelegate {
             var key = _currentKey;
             _currentKey = null;
             if (key != null) {
-                System.println("resetContentIterator: " + key + " skipped off the end -> PLAYED");
-                Catalog.setPosition(key, 0);
-                Catalog.markPlayed(key);
+                markSkippedThrough(key, "resetContentIterator");
             }
             // Nothing left to hand over means the player is done with all of
             // it, so the whole queue is fair game for the purge.
@@ -249,24 +247,15 @@ class GarminPocketCastsContentDelegate extends Media.ContentDelegate {
             return;
         }
 
-        // FILE SECONDS IN, CONTENT SECONDS OUT. The player counts through the
-        // file it was given, and a file fetched at 1.5x is physically shorter
-        // than the episode - so 600 here is 900 of the episode Pocket Casts
-        // knows about. Everything downstream of this line, and everything in
-        // Storage, is content seconds; this is one of the only two places the
-        // two ever meet. Bank the raw number and the next refresh tells the
-        // server the listener is a third of the way further back than they are.
-        var seconds = finished ? 0 : Catalog.toContentSeconds(speedFor(key), playbackPosition);
-        Catalog.setPosition(key, seconds);
-
         // Reaching here means the watch itself moved this episode, which is
         // exactly the condition for reporting it back to Pocket Casts. A
         // position that only ever came from the server is never marked, and so
         // can never overwrite progress made on another device.
         if (finished) {
-            // Finished is reported as a status, not as the 0 stored above -
-            // pushing that position would tell the server the episode is back
-            // at the start and reset it to unplayed everywhere else.
+            // Finished is reported as a status, not as a position - and
+            // markPlayed() zeros the stored position itself, since pushing a 0
+            // would tell the server the episode is back at the start and reset
+            // it to unplayed on every other device.
             Catalog.markPlayed(key);
             System.println("bankPosition: " + key + " -> PLAYED");
 
@@ -282,6 +271,16 @@ class GarminPocketCastsContentDelegate extends Media.ContentDelegate {
                 iterator.finish();
             }
         } else {
+            // FILE SECONDS IN, CONTENT SECONDS OUT. The player counts through
+            // the file it was given, and a file fetched at 1.5x is physically
+            // shorter than the episode - so 600 here is 900 of the episode
+            // Pocket Casts knows about. Everything downstream of this line, and
+            // everything in Storage, is content seconds; this is one of the
+            // only two places the two ever meet. Bank the raw number and the
+            // next refresh tells the server the listener is a third of the way
+            // further back than they are.
+            var seconds = Catalog.toContentSeconds(speedFor(key), playbackPosition);
+            Catalog.setPosition(key, seconds);
             Catalog.markDirty(key);
             System.println("bankPosition: " + key + " -> " + seconds + "s (dirty)");
         }
@@ -325,12 +324,20 @@ class GarminPocketCastsContentDelegate extends Media.ContentDelegate {
             return;
         }
 
-        System.println("bankPosition: " + key + " skipped off the end -> PLAYED");
-        Catalog.setPosition(key, 0);
-        Catalog.markPlayed(key);
+        markSkippedThrough(key, "bankPosition");
 
         // No flush from here: the next episode is starting to decode, and the
         // flush points deliberately avoid firing a BLE request mid-decode.
         // The report goes out at the next pause, stop or refresh.
+    }
+
+    // An episode the player moved off without ever sending COMPLETE was skipped
+    // through - the listener nudging past its last minutes of ads, which is a
+    // request to finish it. markPlayed() zeros the stored position itself.
+    // `where` is only the log prefix, so which path noticed stays visible in
+    // the one diagnostic channel the device has.
+    private function markSkippedThrough(key as String, where as String) as Void {
+        System.println(where + ": " + key + " skipped off the end -> PLAYED");
+        Catalog.markPlayed(key);
     }
 }

@@ -307,15 +307,18 @@ module Catalog {
     // the one Pocket Casts and every other device agree on. The media layer is
     // the only place file seconds exist, because the file is physically
     // shorter than the episode. These two functions are the entire boundary,
-    // and there are exactly two callers:
+    // and there are exactly three callers:
     //
     //   toContentSeconds  GarminPocketCastsContentDelegate.bankPosition()
     //   toFileSeconds     GarminPocketCastsContentIterator, building ActiveContent
+    //   toFileSeconds     GarminPocketCastsContentIterator.scaleSkip()
     //
-    // Keeping it to those two is what lets markDirty, the outbox,
-    // mergeServerPosition, furthest-along-wins, getDuration and the hub's
-    // "23m left" all carry on untouched: they were always content seconds on
-    // both sides and still are.
+    // The third is the same conversion applied to a DELTA rather than a
+    // position: a 30s skip means 30s of episode, which is 20s of a file
+    // fetched at 1.5x. Keeping it to these three is what lets markDirty, the
+    // outbox, mergeServerPosition, furthest-along-wins, getDuration and the
+    // hub's "23m left" all carry on untouched: they were always content
+    // seconds on both sides and still are.
     //
     // THEY TAKE THE PERCENTAGE, NOT THE UUID, AND THAT IS DELIBERATE. Looking
     // the speed up in here meant an encrypted Storage read and a dictionary
@@ -887,9 +890,9 @@ module Catalog {
         var refIds = getRefIds();
         var selected = getSelectedListsInOrder();
 
-        // Read once, not once per episode. isFinished() deserialises the
-        // whole of FINISHED_KEY - up to MAX_FINISHED uuids, ~3.8 KB - on every
-        // call, and the loop below used to ask it for every episode of every
+        // Read once, not once per episode. FINISHED_KEY is up to MAX_FINISHED
+        // uuids (~3.8 KB) and getIds() deserialises the whole value on every
+        // call; the loop below used to consult it for every episode of every
         // selected playlist. This is the one code path the system polls
         // unattended, so it is the one where that matters to the battery.
         var finished = getIds(FINISHED_KEY);
@@ -1166,7 +1169,14 @@ module Catalog {
 
     // Everything that follows from an episode being listened to right through:
     // report it as played, never download it again, and reclaim its audio.
+    //
+    // The stored position goes to 0 here. A finished episode is at its end, but
+    // it is reported to the server as a STATUS, never as that position - and
+    // every caller was zeroing it by hand first. Doing it here means a resume
+    // reads 0 (start from the top) and pushNext() cannot accidentally send a
+    // stale positive position for something already marked played.
     function markPlayed(uuid as String) as Void {
+        setPosition(uuid, 0);
         addId(PLAYED_KEY, uuid, 0);
         markDirty(uuid);
         markFinished(uuid);
@@ -1186,14 +1196,6 @@ module Catalog {
             // be deferred for the whole life of the process.
             retireDownload(uuid);
         }
-    }
-
-    // Completed on this watch. Kept out of getPendingTracks() so the next sync
-    // does not simply download it again - which it otherwise would, forever,
-    // for any episode in a manual playlist. (Up Next self-heals: reporting the
-    // episode played removes it server-side.)
-    function isFinished(uuid as String) as Boolean {
-        return getIds(FINISHED_KEY).indexOf(uuid) >= 0;
     }
 
     // Forget that an episode was finished, once nothing lists it any more.
@@ -1244,6 +1246,12 @@ module Catalog {
         putIds(FINISHED_KEY, kept);
     }
 
+    // Completed on this watch. Kept out of getPendingTracks() so the next sync
+    // does not simply download it again - which it otherwise would, forever,
+    // for any playlist including Up Next: `status: 3` sets the played flag
+    // server-side and does not touch the queue, so removal is the client's job
+    // (see getUpNextRemovals()). pruneFinished() clears the marker once the
+    // episode has actually left every fetched playlist.
     function markFinished(uuid as String) as Void {
         addId(FINISHED_KEY, uuid, MAX_FINISHED);
     }
@@ -1607,6 +1615,24 @@ module Catalog {
 
     function clearPlayed(uuid as String) as Void {
         removeId(PLAYED_KEY, uuid);
+    }
+
+    // The audio housekeeping every NON-PLAYBACK entry point runs: reclaim the
+    // bytes of episodes finished during an earlier invocation, then sweep the
+    // media cache for audio that nothing points at any more.
+    //
+    // The order is load-bearing and is the reason the two are bound together
+    // here rather than called side by side at each site: the purge puts the
+    // cache and refIds back in step first, so nothing it has just deleted is
+    // then mistaken for an orphan.
+    //
+    // getContentDelegate() is the one entry point that must NOT call this - a
+    // content iterator is about to hold those media objects, and deleting a
+    // cache entry out from under the player is the move that rebooted the watch
+    // in rule 2.
+    function reclaimIdleAudio() as Void {
+        purgeFinished();
+        reclaimOrphans(false);
     }
 
     // Fold a position the server reports into what we hold locally.

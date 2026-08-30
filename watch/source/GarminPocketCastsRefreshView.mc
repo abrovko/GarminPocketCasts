@@ -191,6 +191,11 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
             return;
         }
 
+        // The one-tap path only carries on by itself when the fetch was clean.
+        // A message is something to show, and the only screen with room to show
+        // it is the picker.
+        var happyRefresh = _autoSync && _message == null;
+
         // The whole of "one tap". The system's sync screen comes up over this
         // spinner, and GarminPocketCastsSyncDelegate.finishSync() puts the
         // playback hub underneath it before it comes down - so the user taps
@@ -199,7 +204,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         // shouldSync() rather than hasPendingDownloads(), so a suppressed
         // retry after a fruitless sync falls through to the picker instead of
         // silently doing nothing.
-        if (_autoSync && _message == null && Catalog.shouldSync()) {
+        if (happyRefresh && Catalog.shouldSync()) {
             System.println("refresh: auto-syncing");
             SyncStarter.begin();
             armRescue();
@@ -219,7 +224,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         // Sync failed row. shouldSync() above has already sent the healthy
         // case to the sync, so reaching here with something pending means
         // exactly that suppression.
-        if (_autoSync && _message == null && !Catalog.hasPendingDownloads() &&
+        if (happyRefresh && !Catalog.hasPendingDownloads() &&
                 Catalog.getSelectedLists().size() > 0) {
             System.println("refresh: nothing new, up to date");
             // The one answer the user cannot check for themselves. They can
