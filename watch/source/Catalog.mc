@@ -265,6 +265,25 @@ module Catalog {
         return 0;
     }
 
+    // The speed a record was fetched at, as a percentage. Absent means 100 -
+    // the same convention "d" uses for an unknown duration, so every record
+    // written before the field existed reads correctly and nothing migrates.
+    function recordSpeed(record as Dictionary) as Number {
+        var percent = record.get("s");
+        if (percent instanceof Number && percent > 0) {
+            return percent;
+        }
+        return 100;
+    }
+
+    function setRecordSpeed(record as Dictionary<String, PersistableType>, percent as Number) as Void {
+        if (percent == 100) {
+            record.remove("s");
+        } else {
+            record.put("s", percent);
+        }
+    }
+
     // --- playback speed, and the two places time crosses the media boundary ---
 
     // The speed THIS FILE ON THIS WATCH was encoded at, as a percentage.
@@ -281,11 +300,7 @@ module Catalog {
         if (record == null) {
             return 100;
         }
-        var percent = record.get("s");
-        if (percent instanceof Number && percent > 0) {
-            return percent;
-        }
-        return 100;
+        return recordSpeed(record);
     }
 
     // Record the speed a completed download was encoded at.
@@ -295,11 +310,7 @@ module Catalog {
             return;
         }
         var patched = record as Dictionary<String, PersistableType>;
-        if (percent == 100) {
-            patched.remove("s");
-        } else {
-            patched.put("s", percent);
-        }
+        setRecordSpeed(patched, percent);
         putRecord(uuid, patched);
     }
 
@@ -512,14 +523,37 @@ module Catalog {
         for (var i = 0; i < records.size(); i++) {
             var uuid = records[i].get("k");
             if (uuid instanceof String) {
-                // A duration already learned outlives the fetch that replaces
-                // the record. Most of them arrive from /user/in_progress or a
-                // findbyepisode lookup rather than from the playlist entry - a
-                // manual playlist entry carries no duration at all - so
-                // overwriting wholesale would throw one away on every single
-                // refresh and the remaining time would never settle.
-                if (recordDuration(records[i] as Dictionary) == 0) {
-                    setRecordDuration(records[i], getDuration(uuid));
+                // The record is REPLACED, not merged, so anything this watch
+                // learned since the last fetch has to be carried across by
+                // hand. Read once - a Storage read deserialises the whole
+                // value, so asking for the duration and the speed separately
+                // would be two.
+                var previous = getRecord(uuid);
+                if (previous != null) {
+                    // A duration already learned outlives the fetch that
+                    // replaces the record. Most of them arrive from
+                    // /user/in_progress or a findbyepisode lookup rather than
+                    // from the playlist entry - a manual playlist entry
+                    // carries no duration at all - so overwriting wholesale
+                    // would throw one away on every single refresh and the
+                    // remaining time would never settle.
+                    if (recordDuration(records[i] as Dictionary) == 0) {
+                        setRecordDuration(records[i], recordDuration(previous));
+                    }
+
+                    // The speed THIS FILE was encoded at is worse: no API
+                    // response ever carries it, and recordDownload() writes it
+                    // long AFTER the fetch that created the record - so the
+                    // first refresh after a download reset the episode to 100,
+                    // and every position for it was then read back against the
+                    // wrong timeline. Measured on a fenix 8
+                    // (logs/2026-08-30_184738_fenix-8-51mm): an episode
+                    // downloaded at 125 resumed at "113s (file)" before a
+                    // refresh and at "142s (file)" after one - 36 episode-
+                    // seconds late - and banked positions a fifth short of the
+                    // truth, which is exactly what content-vs-file seconds
+                    // exists to stop.
+                    setRecordSpeed(records[i], recordSpeed(previous));
                 }
                 putRecord(uuid, records[i]);
                 keep.put(uuid, true);
