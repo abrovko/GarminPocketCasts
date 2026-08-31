@@ -40,6 +40,23 @@ class SkipButton extends Media.SystemButton {
         _detailId = detailId;
     }
 
+    // Point the button at a different pair of drawables. The app scales the
+    // skip delta by playback speed, so a queue that steps to an episode
+    // encoded at another speed needs a glyph naming that speed's number -
+    // see GarminPocketCastsContentIterator.getPlaybackProfile(). Only ever
+    // called from a profile rebuild, which happens on a speed change and not
+    // on the hot per-frame getPlaybackProfile() calls, so dropping the cached
+    // bitmaps here costs one reload per speed transition, not per draw.
+    function retarget(iconId as ResourceId, detailId as ResourceId) as Void {
+        if (iconId == _iconId && detailId == _detailId) {
+            return;
+        }
+        _iconId = iconId;
+        _detailId = detailId;
+        _icon = null;
+        _detail = null;
+    }
+
     // Signature is the SDK's exactly - see rule 8. The player's callback
     // signatures are runtime assertions, and a declaration that merely looks
     // equivalent throws "Unexpected Type Error" at the first draw.

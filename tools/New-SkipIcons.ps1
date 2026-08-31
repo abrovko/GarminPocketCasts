@@ -1,17 +1,30 @@
 <#
 .SYNOPSIS
-    Draws the media player's two skip-button glyphs.
+    Draws the media player's skip-button glyphs - one per distinct skip delta
+    the app can advertise.
 
 .DESCRIPTION
     The stock skip icons have "30" baked into them, and Garmin's own doc for
     PlaybackProfile.skipBackwardTimeDelta says overriding the delta makes a
-    custom icon necessary. SkipButton.mc feeds these two SVGs to the player
+    custom icon necessary. SkipButton.mc feeds these SVGs to the player
     through Media.SystemButton; this script is what draws them.
 
-    THE NUMBERS ON THE BUTTONS MUST MATCH SKIP_FORWARD_SECONDS and
-    SKIP_BACKWARD_SECONDS in GarminPocketCastsContentIterator.mc. Change one
-    of those and re-run this, or the player advertises a skip the app does not
-    perform - the exact bug the custom art exists to fix.
+    THE APP SCALES THE SKIP DELTA BY PLAYBACK SPEED. A 30 s (episode-time)
+    forward skip is 24 s of a file transcoded at 1.25x, 15 s at 2x, and the
+    control dial prints whichever number is live. So there is not one forward
+    icon but one per distinct scaled value, and the same for backward. This
+    script computes that set from:
+
+      - the base deltas, SKIP_FORWARD_SECONDS / SKIP_BACKWARD_SECONDS in
+        GarminPocketCastsContentIterator.mc  (-Forward / -Backward here)
+      - the speeds the proxy offers, Proxy.speeds() in Proxy.mc  (-Speeds here)
+      - Catalog.toFileSeconds()'s integer division and scaleSkip()'s 5 s floor
+
+    Change any of those and re-run this, then reconcile the <bitmap> block in
+    resources/drawables/drawables.xml with the block printed at the end and
+    the delta->resource mapping in the iterator's forwardArt()/backwardArt().
+    Miss a value and the player advertises a skip on an icon that names a
+    different one - the exact bug the custom art exists to fix.
 
     Output is FILLS ONLY - no <text>, no stroke, no <g transform>. The
     launcher icon proves M/L fills rasterise; nothing proves the resource
@@ -21,18 +34,19 @@
     icon is mirrored here, in the coordinates.
 
     The SVGs carry no device sizing. resources/drawables/drawables.xml scales
-    them as a percentage of the screen, so there are no resources-icon<size>/
+    them in pixels (44 icon / 60 detail), so there are no resources-icon<size>/
     override folders for these the way there are for the launcher icon - see
     the comment there for why.
 
 .EXAMPLE
     .\tools\New-SkipIcons.ps1
-    .\tools\New-SkipIcons.ps1 -Forward 45 -Backward 15
+    .\tools\New-SkipIcons.ps1 -Forward 30 -Backward 10 -Speeds 100,150,200
 #>
 [CmdletBinding()]
 param(
     [int]$Forward = 30,
     [int]$Backward = 10,
+    [int[]]$Speeds = @(100, 125, 150, 175, 200),
     [string]$OutDir
 )
 
@@ -190,7 +204,52 @@ $body
     Write-Host ("wrote {0}  ({1}s, {2} bytes)" -f $file, $text, (Get-Item $path).Length)
 }
 
-# Forward is travelled clockwise, so the head lands at the left of the gap
-# pointing right. Backward is the mirror of exactly that.
-Write-Icon "skip_forward.svg"  "$Forward"  $false
-Write-Icon "skip_backward.svg" "$Backward" $true
+function Get-ScaledDelta([int]$base, [int]$speed) {
+    # Mirrors Catalog.toFileSeconds() then GarminPocketCastsContentIterator
+    # .scaleSkip(): integer division toward zero, then a 5 s floor. Speed 100
+    # (or anything non-positive) is the base unchanged - toFileSeconds shortcuts
+    # it - so a 1.0x file keeps the 30 / 10 the buttons were always drawn with.
+    if ($speed -eq 100 -or $speed -le 0) { $d = $base }
+    else { $d = [int][Math]::Truncate(($base * 100) / $speed) }
+    if ($d -lt 5) { $d = 5 }
+    return $d
+}
+
+# The distinct numbers the dial can show, one art file each. Sorted high to
+# low only so the console and the pasted block read in speed order.
+$fwdDeltas  = $Speeds | ForEach-Object { Get-ScaledDelta $Forward  $_ } | Sort-Object -Unique -Descending
+$backDeltas = $Speeds | ForEach-Object { Get-ScaledDelta $Backward $_ } | Sort-Object -Unique -Descending
+
+# Retire the pre-scaling pair so a stale "30"/"10" file cannot be picked up by
+# a hand-written resource entry after the scheme changed.
+foreach ($old in @("skip_forward.svg", "skip_backward.svg")) {
+    $p = Join-Path $OutDir $old
+    if (Test-Path $p) { Remove-Item $p; Write-Host "removed $old (pre-scaling name)" }
+}
+
+$want = @()
+foreach ($d in $fwdDeltas)  { Write-Icon "skip_f$d.svg" "$d" $false; $want += "skip_f$d.svg" }
+foreach ($d in $backDeltas) { Write-Icon "skip_b$d.svg" "$d" $true;  $want += "skip_b$d.svg" }
+
+# Anything matching the scheme that the current set does not want is an
+# orphan from an earlier speed list - flag it, do not delete it blind.
+Get-ChildItem -Path $OutDir -Filter "skip_[fb]*.svg" | ForEach-Object {
+    if ($want -notcontains $_.Name) { Write-Warning "orphan: $($_.Name) - not in the current delta set, delete by hand" }
+}
+
+Write-Host ""
+Write-Host "resources/drawables/drawables.xml - the Skip* <bitmap> block must read:"
+Write-Host ""
+function Emit([string]$dir, $deltas) {
+    foreach ($d in $deltas) {
+        $id = "Skip{0}{1}" -f $dir, $d
+        $f  = "skip_{0}{1}.svg" -f $dir.ToLower(), $d
+        "    <bitmap id=`"${id}Icon`"   filename=`"$f`" dithering=`"none`" compress=`"true`" scaleX=`"44`" scaleY=`"44`" />"
+        "    <bitmap id=`"${id}Detail`" filename=`"$f`" dithering=`"none`" compress=`"true`" scaleX=`"60`" scaleY=`"60`" />"
+    }
+}
+Emit "F" $fwdDeltas
+Emit "B" $backDeltas
+Write-Host ""
+Write-Host ("iterator forwardArt() must map: {0}" -f ($fwdDeltas -join ", "))
+Write-Host ("iterator backwardArt() must map: {0}" -f ($backDeltas -join ", "))
