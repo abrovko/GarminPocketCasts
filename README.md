@@ -57,46 +57,6 @@ hand for anything neither covers.
 **Playback speed** (see below) and **Reset everything** (wipes downloads, playlists and the
 account; the next launch behaves like a fresh install).
 
-### Playback speed
-
-The watch has no playback speed control of its own, so faster-than-normal playback needs the
-audio to arrive already sped up. [`proxy/`](proxy/) holds a small self-hosted service that does
-that — it fetches an episode, runs it through ffmpeg and streams the result to the watch.
-Deploying it takes about ten minutes on Google Cloud Run and stays inside the free tier;
-`proxy/README.md` has the steps.
-
-Once it is configured under *Settings → Playback speed*, downloads run through it at your
-chosen speed (1.0×, 1.25×, 1.5×, 1.75× or 2.0×) and quality (64k/96k mono or 128k stereo).
-
-- **Smaller downloads are the bigger win.** Re-encoding to 64 kbps mono makes an episode about
-  three times smaller, and 1.0× is a valid setting if that is all you want.
-- **Positions stay in the episode's own timeline**, so what the phone shows and what the watch
-  shows agree regardless of speed. Skip forward and back move by the same amount of episode
-  they always did.
-- **It is optional and fails soft.** With no proxy configured nothing changes, and if a
-  configured proxy cannot be reached the sync fetches the episode straight from its podcast
-  CDN at full size instead.
-
-### What you need connected, and when
-
-| Step | Link |
-| --- | --- |
-| Refreshing the playlist / episode list | **Phone** (BLE) — Connect IQ only routes web requests through the phone outside sync mode |
-| Downloading episode audio | **Wi-Fi** — a known network in range |
-| Playback | nothing; it is all on the watch |
-
-Entering the proxy address and token wants the phone in range too, and that is what makes it
-painless: the text picker opens a text box and keyboard **on the phone**, so both are a
-copy-paste and neither is spelled out on the watch.
-
-What the phone does not change is how much the field accepts — that cap belongs to the watch
-and applies to pasted text as much as typed. A fēnix 7 stops at 31 characters, a fēnix 8 takes
-256. The setup instructions ask for a short hostname and a 22-character token so that they fit
-either; if your watch has the roomier picker you are free to use longer ones, bearing in mind
-that every watch you set the proxy up on has to accept the same token.
-
-The address is entered without `https://` — the watch assumes it — so those eight characters
-never count against the limit. An explicit `http://` or `https://` is accepted too.
 
 ## Getting it onto a watch
 
@@ -140,6 +100,35 @@ Installing a binary from someone else is a decision, not a formality:
 
 The licence disclaims all warranties, and that is meant literally: you install these files,
 on your own hardware, at your own risk.
+
+### Playback speed
+
+The watch has no playback speed control of its own, so faster-than-normal playback needs the
+audio to arrive already sped up. [`proxy/`](proxy/) holds a small self-hosted service that does
+that — it fetches an episode, runs it through ffmpeg and streams the result to the watch.
+Deploying it takes about ten minutes on Google Cloud Run and stays inside the free tier;
+`proxy/README.md` has the steps.
+
+Once it is configured under *Settings → Playback speed*, downloads run through it at your
+chosen speed (1.0×, 1.25×, 1.5×, 1.75× or 2.0×) and quality (64k/96k mono or 128k stereo).
+
+- **Smaller downloads are the bigger win.** Re-encoding to 64 kbps mono makes an episode about
+  three times smaller, and 1.0× is a valid setting if that is all you want.
+- **Positions stay in the episode's own timeline**, so what the phone shows and what the watch
+  shows agree regardless of speed. Skip forward and back move by the same amount of episode
+  they always did.
+- **It is optional and fails soft.** With no proxy configured nothing changes, and if a
+  configured proxy cannot be reached the sync fetches the episode straight from its podcast
+  CDN at full size instead.
+
+### What you need connected, and when
+
+| Step | Link |
+| --- | --- |
+| Refreshing the playlist / episode list | **Phone** (BLE) — Connect IQ only routes web requests through the phone outside sync mode |
+| Downloading episode audio | **Wi-Fi** — a known network in range |
+| Playback | nothing; it is all on the watch |
+
 
 ## Repository layout
 
