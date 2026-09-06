@@ -25,6 +25,19 @@ the Pocket Casts web app uses, which can change without notice.
 - Optional **playback speed** (1.0×–2.0×) and smaller downloads, via a self-hosted
   transcoding proxy — see [`proxy/`](proxy/)
 
+## Screenshots
+
+Taken on a fēnix 8 (51 mm).
+
+| | | |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/music-source.png" width="220" alt="Pocket Casts (Unofficial) as a music source"> | <img src="docs/screenshots/play-hub.png" width="220" alt="Downloaded episodes with remaining time"> | <img src="docs/screenshots/hub-get-new-episodes.png" width="220" alt="Get new episodes and Settings at the foot of the hub"> |
+| A music source like any other | Downloaded episodes, with time remaining | One tap to fetch; *Settings* below it |
+| <img src="docs/screenshots/select-playlists.png" width="220" alt="Playlist toggles, Up Next pinned first"> | <img src="docs/screenshots/syncing.png" width="220" alt="System sync screen downloading an episode"> | <img src="docs/screenshots/now-playing.png" width="220" alt="Now playing screen with scaled skip button"> |
+| Up Next pinned first, then manual playlists | Downloading over Wi-Fi | Playing offline — the skip button reads 24 s, scaled for 1.25× audio |
+| <img src="docs/screenshots/playback-speed.png" width="220" alt="Proxy server, token, speed and quality rows"> | <img src="docs/screenshots/account.png" width="220" alt="Account screen with email and password rows"> | |
+| Optional transcoding proxy: speed and bitrate | Signed in on the watch | |
+
 ## Using it on the watch
 
 The app appears as a music source: **Music → sources → Pocket Casts (Unofficial)**. That
@@ -137,7 +150,7 @@ watch/      the Connect IQ app — manifest, jungle, Monkey C source, resources
 proxy/      optional self-hosted transcoding service (Python, Cloud Run)
 tools/      build, deploy and release automation (PowerShell)
 tests/api/  contract tests against the Pocket Casts API — not tests of the app
-docs/       design and security notes
+docs/       design and security notes, plus the README screenshots
 ```
 
 `watch/` is self-contained and is the folder to open in VS Code. `proxy/` is an entirely
