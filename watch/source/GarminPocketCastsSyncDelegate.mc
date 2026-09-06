@@ -34,6 +34,11 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
     static const LOG_EVERY_BYTES = 4000000;
     static const NOTIFY_EVERY_MS = 1000;
 
+    // The two HTTP statuses that mean "this episode, permanently" rather than
+    // "this session, for now". See the skip in onDownload().
+    static const HTTP_NOT_FOUND = 404;
+    static const HTTP_GONE = 410;
+
     // Stall watchdog. Every path out of this delegate runs from a callback, so
     // a request that goes out and never comes back - or comes back byte by
     // byte and then simply stops - leaves the sync session open with nothing
@@ -70,8 +75,26 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
     private var _client as PocketCastsClient?;
 
     // The speed the download in flight was requested at, banked against the
-    // episode only once the audio actually lands. 100 means unproxied.
+    // episode only once the audio actually lands.
+    //
+    // NOT a proxy flag. It reads like one - an unproxied fetch leaves it at
+    // 100 - but a PROXIED fetch at speed 100 leaves it at 100 too, and that is
+    // a setting proxy/README.md actively recommends (the size reduction is
+    // worth more than the speed, so "unchanged speed" is a sensible everyday
+    // choice). Use _usedProxy for "did this go through the proxy".
     private var _usedSpeed as Number = 100;
+
+    // Whether the download in flight went through the proxy.
+    //
+    // Kept separately rather than inferred from _usedSpeed != 100, which is
+    // what it used to be and was wrong at exactly one setting: a proxied
+    // download at speed 100. There the retry below never fired, so a proxy
+    // that was down cost the listener EPISODES rather than speed - the one
+    // promise the whole feature rests on - and _bypassProxy was never set, so
+    // a genuinely dead url never reached the CDN and never reached the 404
+    // skip either. Both failure modes were silent and only in that
+    // configuration.
+    private var _usedProxy as Boolean = false;
 
     // Stand-in denominator for the progress bar while a proxied download is in
     // flight, or 0 when it is not known. A streamed transcode is chunked and
@@ -396,6 +419,7 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
     private function fetch(track as Track) as Void {
         markProgress();
         var proxied = Proxy.isEnabled() && !_bypassProxy;
+        _usedProxy = proxied;
         _usedSpeed = proxied ? Proxy.getSpeedPercent() : 100;
 
         // Worked out once per track, not per progress event. Unproxied
@@ -618,7 +642,11 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
         // one-failure-poisons-the-session rule below, because that rule is
         // about a transport the system has soured - here the second attempt
         // goes somewhere else entirely.
-        if (_usedSpeed != 100 && !_bypassProxy && track != null) {
+        //
+        // _usedProxy, NOT _usedSpeed != 100 - see the member. Inferring it from
+        // the speed silently disabled this whole branch for a proxy running at
+        // speed 100, which is a configuration the proxy README recommends.
+        if (_usedProxy && !_bypassProxy && track != null) {
             System.println("sync: proxy failed, retrying " + track.key + " direct");
             _bypassProxy = true;
             _bytes = 0;
@@ -626,9 +654,71 @@ class GarminPocketCastsSyncDelegate extends Communications.SyncDelegate {
             fetch(track);
             return;
         }
+
+        // Did this answer come from the podcast CDN rather than the proxy?
+        // Read from the attempt that just failed, and read HERE, before
+        // _bypassProxy is reset below - the reset is what would make a
+        // direct-retry 404 look like a proxy one.
+        var fromCdn = !_usedProxy;
         _bypassProxy = false;
         if (_error == null) {
             _error = "Download failed (" + responseCode + ")";
+        }
+
+        // A 404 or a 410 is the SERVER ANSWERING, not the transport breaking,
+        // and it is about one episode rather than the session. Skip it and
+        // carry on down the queue.
+        //
+        // This is the one exception to the one-failure-poisons-the-session
+        // rule below, and it is exempt for the same reason the proxy retry is:
+        // that rule was learned from a large download that BROKE mid-transfer
+        // and took the network stack with it - the tell was the next request
+        // returning instantly with 0 bytes and once with an impossible -1002.
+        // A clean HTTP status is the opposite shape of failure. Measured on a
+        // fenix 8 (logs/2026-09-06_091420_fenix-8-51mm, 06:36): two full
+        // episodes downloaded, then a proxied fetch answered 502 and the
+        // direct CDN retry answered a well-formed 404 in three seconds having
+        // moved no bytes at all. The session was plainly still healthy - it
+        // was the url that was dead.
+        //
+        // What kills a url like that is a podcast changing hosts. .NET Rocks!
+        // re-published its entire back catalogue onto Spreaker; every episode
+        // got a new guid, Pocket Casts minted new uuids, and the entries
+        // already sitting in the listener's Up Next kept pointing at the old
+        // host. Up Next entries are per-user and are never re-resolved, so
+        // that url stays dead for as long as the episode is queued. Two of
+        // them cost this sync its whole remaining queue six times over ten
+        // minutes, and the two good episodes behind them only landed once the
+        // dead one was removed by hand.
+        //
+        // DELIBERATELY NOT RECORDED. The uuid is not banked anywhere, so the
+        // episode stays pending and every later sync tries it again. That is
+        // the accepted cost of not carrying another Storage list: the brake is
+        // the existing fruitless-sync test in completeSync(), which raises
+        // syncBlocked as soon as the dead episode is the only thing left in
+        // the queue (remaining >= _total). So the retries stop once the
+        // healthy episodes around it have landed, rather than never.
+        //
+        // _error is already set above and stays set, which is what puts the
+        // reason on the picker's Sync failed row afterwards. A skip is still a
+        // failure worth reporting - it is just not a reason to abandon the
+        // episodes queued behind it.
+        //
+        // ONLY when the answer came from the podcast CDN, never from the proxy
+        // (fromCdn, off _usedProxy). A proxy answering 404 is a misconfigured
+        // proxy - wrong host, wrong path - and skipping on that would walk the
+        // whole queue calling every episode dead. The proxy reports a source it
+        // could not fetch as a 502, which falls through to the retry above and
+        // arrives here on the direct attempt.
+        if (fromCdn && (responseCode == HTTP_NOT_FOUND || responseCode == HTTP_GONE) && track != null) {
+            System.println("sync: " + track.key + " is gone (" + responseCode +
+                "), skipping to the next");
+            _queue = _queue.slice(1, null);
+            // Deliberately NOT advancing notifySyncProgress, for the same
+            // reason the abandon path below does not: a track that failed is
+            // not a track that is done.
+            downloadNext();
+            return;
         }
 
         // One failure poisons the rest of the sync session. Measured on

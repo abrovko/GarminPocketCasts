@@ -47,6 +47,23 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
         // auto-sync: the user is standing in the picker, so the answer they
         // want is the refreshed menu, not a download starting under them.
         if (id.equals(GarminPocketCastsConfigureSyncView.REFRESH_ID)) {
+            // Both cleared, for the same reason Download now clears them: this
+            // is a deliberate press on the menu that is SHOWING the failure,
+            // and the menu the refresh switches back cannot redraw - it is
+            // built from Storage, so a sync error left there reappears on a
+            // screen the user just asked to be refreshed and reads as the
+            // refresh having failed. Measured on a fenix 8
+            // (logs/2026-09-06_091420_fenix-8-51mm): a 404 on one episode, then
+            // every later "refresh: done success=true" still landing on a menu
+            // headed "Sync failed - Download failed (404)".
+            //
+            // THE PAIR MOVES TOGETHER. completeSync() sets them together and
+            // Download now spends them together, and it has to stay that way:
+            // clearing the message while leaving the suppression raised is the
+            // worst of both, a menu whose back-out silently does nothing and
+            // no longer says why.
+            Catalog.setSyncBlocked(false);
+            Catalog.setSyncError(null);
             Nav.refresh(false, WatchUi.SLIDE_LEFT);
             return;
         }
