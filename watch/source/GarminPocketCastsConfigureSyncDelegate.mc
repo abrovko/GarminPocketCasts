@@ -73,11 +73,33 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
     // Backing out is the commit action, but only when there is genuinely
     // something left to fetch. Calling startSync() unconditionally sent the
     // watch back into sync mode every single time you backed out of this menu,
-    // which is the download loop you hit. With nothing pending, go to the
-    // playback menu instead - that is the useful destination once tracks are
-    // on the device.
+    // which is the download loop you hit. With nothing pending it just goes to
+    // the playback menu - that is the useful destination once tracks are on the
+    // device.
+    //
+    // BACK ALWAYS LEAVES, whether or not it starts a sync. That is not tidiness:
+    // this menu used to stay on screen after SyncStarter.begin(), on the
+    // assumption that the system's sync screen would cover it a moment later.
+    // When the watch silently DROPS startSync2 (see "Device-state false
+    // alarms" - it answers "download already in progress" and never calls
+    // onStartSync) nothing covers it, so the next back press re-entered this
+    // same onBack and asked for the sync again. Read off a fenix 8
+    // (logs/2026-09-05_200938_fenix-8-51mm, 20:04:01/04/07): three onBack
+    // lines, three identical startSync2 lines, not one onStartSync - and no
+    // way out of the menu but force-quitting the app.
     function onBack() as Void {
         Catalog.logState("onBack");
+
+        // Sync mode does not come up instantly and this menu is still live
+        // while it does, so a second press in that window must not launch a
+        // second sync - it just leaves, like every other back press here. Same
+        // guard as GarminPocketCastsRefreshDelegate.onBack(), which has the
+        // window for the same reason.
+        if (SyncStarter.launched()) {
+            System.println("onBack: sync already launched, leaving it running");
+            Nav.hub(WatchUi.SLIDE_RIGHT);
+            return;
+        }
 
         // A sync that made no progress raises the block, and it is spent here:
         // this back-out escapes to the playback menu instead of starting the
@@ -95,9 +117,16 @@ class GarminPocketCastsConfigureSyncDelegate extends WatchUi.Menu2InputDelegate 
             // Nothing to report on the hub, for the same reason as the
             // Download now row above: this menu was the screen showing it.
             SyncStarter.begin(null);
-            return;
         }
 
+        // After begin(), not instead of it, and in that order - the request
+        // goes out before a Menu2 is built. Switching UNDER the system's sync
+        // screen is what finishSync() already does, so a sync that does come up
+        // is unaffected: it lands on its own freshly built hub either way, and
+        // this one is only ever seen if the launch was dropped. Which makes
+        // this the whole fix - the worst case is now "you are on the hub and
+        // nothing downloaded", not a menu that answers every back press with
+        // another sync request.
         Nav.hub(WatchUi.SLIDE_RIGHT);
     }
 
