@@ -2,9 +2,18 @@
 
 The watch cannot vary playback rate, so the audio has to arrive already sped
 up. This service pulls an episode from its podcast CDN, pipes it through
-ffmpeg's `atempo` filter, and streams the re-encoded MP3 straight back as the
-response body. Nothing is written to disk and nothing is remembered between
-requests.
+ffmpeg's `atempo` filter, and hands the re-encoded MP3 back as the response
+body. Nothing is remembered between requests.
+
+THE OUTPUT CARRIES AN ID3v2 TAG AND THAT IS LOAD-BEARING, not metadata
+politeness: without a tag at the head of the file the watch cannot seek
+inside the episode at all - every skip restarts the audio while the progress
+ring advances normally. See ffmpeg_argv().
+
+The body is streamed; PC_BUFFER=1 sends a finished temp file instead, which
+costs a silent window but buys a Xing seek table and a real Content-Length.
+Neither mode changes whether an episode can be seeked - see sink_args() and
+buffered_enabled().
 
 Speeding an episode up also shrinks it - 1.5x at 64 kbps mono turns a typical
 37 MB episode into about 12 MB - which matters more than the speed itself: on
@@ -33,6 +42,7 @@ import logging
 import os
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -55,9 +65,22 @@ DEFAULT_BITRATE = 64
 
 # Hard ceilings. A leaked token should not be able to run up a bill, and a
 # url that turns out to be a 24-hour livestream should not be followed
-# forever. The byte cap is enforced in the pump, the time cap by ffmpeg.
+# forever. Both are enforced by ffmpeg itself now (-fs and -t), because the
+# output no longer passes through a pump that could count it.
+#
+# MAX_OUTPUT_BYTES is also a MEMORY ceiling, which it was not before: the
+# transcode lands in a temp file, and Cloud Run's /tmp is tmpfs, i.e. RAM.
+# See the deploy notes in README.md - the buffered design wants
+# --concurrency 1 and headroom over this number.
 MAX_OUTPUT_BYTES = 200 * 1024 * 1024
 MAX_OUTPUT_SECONDS = 6 * 60 * 60
+
+# Wall clock for one ffmpeg run. Nothing reaches the client until it exits, so
+# this is a reaper for a request whose client gave up long ago rather than a
+# limit the watch will ever meet: the watch abandons a download after 120s
+# with no bytes (STALL_MS), which is the real ceiling on how long a transcode
+# may take. Measured on hardware, a 15-40 minute episode takes about 30s.
+MAX_TRANSCODE_SECONDS = 300
 
 CHUNK = 64 * 1024
 
@@ -300,7 +323,7 @@ def atempo_chain(factor):
     return ",".join("atempo=%.6g" % p for p in parts)
 
 
-def ffmpeg_argv(p):
+def ffmpeg_argv(p, out_path):
     argv = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"]
 
     # Input-side resilience: podcast urls redirect to a CDN and the CDN
@@ -382,19 +405,60 @@ def ffmpeg_argv(p):
         argv += ["-ac", "1"]
 
     argv += [
-        # A pipe is not seekable, so ffmpeg cannot go back and fill in a Xing
-        # header's frame count. Writing one anyway leaves a header full of
-        # zeros, which reads as a zero-length episode. The output is CBR, so
-        # decoders get an accurate duration from bitrate and file size.
-        "-write_xing", "0",
-        "-id3v2_version", "0",
+        # AN ID3v2 TAG IS WHAT MAKES THE EPISODE SEEKABLE ON THE WATCH. It is
+        # not metadata politeness and it is not optional: this was
+        # `-id3v2_version 0` to save a few dozen bytes, and with no tag at the
+        # head of the file every skip inside a proxied episode restarted the
+        # AUDIO from the beginning while the progress ring advanced normally.
+        #
+        # Bisected against a fenix 9 Pro over five rounds, 2026-09-08/09. The
+        # seek table was never the problem - a working file and a failing one
+        # both carried a complete Info tag (`flags=0x0000000f`: frames, bytes,
+        # TOC and quality, TOC populated and monotonic). Relaying the CDN's
+        # own bytes over this same POST seeked correctly; putting those very
+        # same frames through this muxer with `-c:a copy` did not. The only
+        # structural difference left was the head of the file:
+        #
+        #   works: ID3v2 45 bytes, first frame at 45, Info at 81
+        #   fails: no ID3v2,       first frame at  0, Info at 36
+        #
+        # Writing the tag fixed it, on an ordinary 64 kbps mono 2x transcode.
+        # v3 rather than v4 for the wider compatibility; the tag ffmpeg writes
+        # from the source's metadata is a few dozen bytes.
+        "-id3v2_version", "3",
         "-t", str(MAX_OUTPUT_SECONDS),
-        "-f", "mp3", "pipe:1",
     ]
-    return argv
+    return argv + sink_args(out_path)
 
 
-def selftest_argv(seconds=5, bitrate=64):
+def sink_args(out_path):
+    """Where the mp3 goes, and what that costs the Xing header.
+
+    `out_path` None means a pipe (the default, streamed); a path means the
+    buffered mode, PC_BUFFER=1. See buffered_enabled().
+
+    ffmpeg writes the Xing/Info header at the top of the stream and seeks back
+    at the end to fill in its frame count, byte count and seek table. A PIPE
+    CANNOT BE SEEKED, so a streamed mp3 can carry only a header full of zeros
+    - which reads as a zero-length episode - or, with -write_xing 0, none at
+    all. None at all is the lesser evil and is what the streamed path does.
+
+    A file can be seeked, so the buffered path leaves -write_xing at its
+    default of 1 and gets a real seek table, plus a real Content-Length on the
+    response. NEITHER IS WHAT MAKES AN EPISODE SEEKABLE ON THE WATCH - the
+    ID3v2 tag above is, and both paths write it. Measured on a fenix 9 Pro,
+    2026-09-09: a buffered transcode with a complete Xing table and no ID3 tag
+    did not seek, and the buffered mode was built for exactly that theory.
+
+    The byte cap is enforced by ffmpeg's own -fs on the buffered path, where
+    nothing else is watching, and by the pump on the streamed one.
+    """
+    if out_path is None:
+        return ["-write_xing", "0", "-f", "mp3", "pipe:1"]
+    return ["-fs", str(MAX_OUTPUT_BYTES), "-y", "-f", "mp3", out_path]
+
+
+def selftest_argv(out_path, seconds=5, bitrate=64):
     """A few seconds of generated tone, for proving reachability.
 
     Deliberately depends on nothing outside this container: pointing a watch
@@ -405,19 +469,56 @@ def selftest_argv(seconds=5, bitrate=64):
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-f", "lavfi", "-i", "sine=frequency=440:duration=%d" % seconds,
         "-c:a", "libmp3lame", "-b:a", "%dk" % bitrate, "-ac", "1", "-ar", "44100",
-        "-write_xing", "0", "-id3v2_version", "0",
-        "-f", "mp3", "pipe:1",
-    ]
+        "-id3v2_version", "3",
+    ] + sink_args(out_path)
+
+
+def buffered_enabled():
+    """PC_BUFFER=1 sends the finished file instead of streaming ffmpeg's output.
+
+    Streaming is the default: the watch starts receiving bytes as soon as the
+    first ones exist, which keeps the whole transfer clear of STALL_MS - the
+    120s the sync delegate allows with nothing transferred - however long the
+    episode.
+
+    Buffering trades that for two things a pipe cannot give: a real Xing seek
+    table (see sink_args()) and a real Content-Length, which makes the watch's
+    sync progress bar exact rather than an estimate off Proxy.expectedBytes().
+    It costs a silent window the length of the whole transcode - about 30s for
+    a 15-40 minute episode, and the reason a multi-hour one is a stall risk -
+    and it puts the output in Cloud Run's tmpfs, i.e. RAM, so it wants
+    --memory 1Gi --concurrency 1.
+
+    NEITHER MODE AFFECTS WHETHER AN EPISODE CAN BE SEEKED. That is the ID3v2
+    tag, which both write; buffering was built for the theory that it was the
+    Xing header, and that theory was measured wrong.
+
+        gcloud run services update pc --region  --set-env-vars PC_BUFFER=1
+        gcloud run services update pc --region  --remove-env-vars PC_BUFFER
+
+    Either flips the running service in seconds without rebuilding the image.
+    """
+    return os.environ.get("PC_BUFFER", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def stream(p):
-    """Run ffmpeg over a source url and hand its stdout back as the body."""
-    log.info("transcode speed=%s bitrate=%s mono=%s url=%s",
-             p["speed"], p["bitrate"], p["mono"], p["url"][:120])
-    return stream_argv(ffmpeg_argv(p), p["speed"], p["bitrate"])
+    """Transcode an episode and hand the mp3 back as the body."""
+    buffered = buffered_enabled()
+    log.info("transcode speed=%s bitrate=%s mono=%s mode=%s url=%s",
+             p["speed"], p["bitrate"], p["mono"],
+             "buffered" if buffered else "streamed", p["url"][:120])
+    if buffered:
+        return transcode_and_send(lambda out: ffmpeg_argv(p, out), p["speed"], p["bitrate"])
+    return stream_argv(ffmpeg_argv(p, None), p["speed"], p["bitrate"])
 
 
 def stream_argv(argv, speed, bitrate):
+    """Run ffmpeg to a pipe and hand its stdout back as the response body.
+
+    The default mode - see buffered_enabled() for the alternative and what
+    each costs. No Content-Length is possible here, so the watch falls back to
+    Proxy.expectedBytes() for its progress bar.
+    """
     proc = subprocess.Popen(
         argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
     )
@@ -510,6 +611,121 @@ def stream_argv(argv, speed, bitrate):
     )
 
 
+
+def transcode_and_send(build_argv, speed, bitrate):
+    # NOT named transcode(): that is the /transcode route handler below, and
+    # defining it second silently shadowed this one.
+
+    """Run ffmpeg to a temp file, then stream that file back.
+
+    BUFFERED RATHER THAN STREAMED, AND THAT IS DELIBERATE - see the comment
+    on the output arguments in ffmpeg_argv(). ffmpeg can only write a usable
+    Xing header if it can seek back to it when the encode ends, which rules
+    out a pipe, and without that header the watch cannot seek inside the
+    episode at all.
+
+    The cost is WHEN the bytes move, not how many: the transcode is paced by
+    the source download either way, so the total is much the same, but the
+    client now waits in silence for all of it and then receives the file at
+    local speed. The watch abandons a download after 120s with nothing
+    transferred, so a transcode has to fit inside that; a 15-40 minute
+    episode takes about 30s. The "transcoded N bytes in Ns" line below is
+    what to read if a sync ever starts stalling.
+
+    Buffering also buys a real Content-Length, which the streamed response
+    never had - so the sync progress bar stops being an estimate.
+    """
+    fd, path = tempfile.mkstemp(prefix="pc-", suffix=".mp3")
+    os.close(fd)
+    try:
+        size = run_ffmpeg(build_argv(path), path)
+    except BaseException:
+        discard(path)
+        raise
+
+    return Response(
+        drain_file(path),
+        mimetype="audio/mpeg",
+        headers={
+            "Content-Length": str(size),
+            # What the server actually applied. The watch may well not be
+            # able to read response headers off an audio download - see the
+            # README - so treat this as a diagnostic, never a source of truth.
+            "X-Speed": str(speed),
+            "X-Bitrate": str(bitrate),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def run_ffmpeg(argv, path):
+    """Transcode into `path`, or raise. Returns the size written.
+
+    Everything here happens BEFORE the response is committed, which is the
+    window in which a dead source can still be reported as a status rather
+    than as a cut stream. ffmpeg reports an unusable source - a 404, a 403, a
+    5XX from the CDN - by exiting immediately, and a 200 carrying an empty
+    body means a ContentRef for a zero-byte episode on the watch: a download
+    that looks like it worked and is silently unplayable.
+    """
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=MAX_TRANSCODE_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        log.error("ffmpeg killed after %ds", MAX_TRANSCODE_SECONDS)
+        raise Rejected("source fetch failed", status=502)
+
+    tail = proc.stderr.decode("utf-8", "replace").strip() or "no output from ffmpeg"
+    size = os.path.getsize(path) if os.path.exists(path) else 0
+
+    if proc.returncode != 0 or size == 0:
+        log.error("ffmpeg exit %s, %d bytes: %s", proc.returncode, size, tail[-2000:])
+        # The tail stays in the log and goes no further. ffmpeg names the
+        # target and the failure mode - "Connection refused", "Server
+        # returned 403 Forbidden", "Connection timed out" - and returning
+        # that to the caller turns any SSRF into a response oracle that
+        # enumerates internal hosts and ports. Nothing on the watch reads
+        # this body anyway; it reads the status.
+        raise Rejected("source fetch failed", status=502)
+
+    log.info("transcoded %d bytes in %.1fs", size, time.monotonic() - started)
+    return size
+
+
+def drain_file(path):
+    """Yield the file, then delete it however the response ends.
+
+    The generator is closed on client disconnect as well as on completion,
+    so the finally always runs - which matters more here than it did with a
+    pipe, because /tmp is RAM on Cloud Run and a leaked file is leaked
+    memory for the life of the instance.
+    """
+    def gen():
+        try:
+            with open(path, "rb") as fh:
+                while True:
+                    chunk = fh.read(CHUNK)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            discard(path)
+    return gen()
+
+
+def discard(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # routes
 # ---------------------------------------------------------------------------
@@ -549,8 +765,11 @@ def health():
 @app.route("/selftest.mp3", methods=["GET", "POST"])
 @guard
 def selftest():
-    log.info("selftest via %s", request.method)
-    return stream_argv(selftest_argv(), 100, 64)
+    log.info("selftest via %s, mode=%s", request.method,
+             "buffered" if buffered_enabled() else "streamed")
+    if buffered_enabled():
+        return transcode_and_send(lambda out: selftest_argv(out), 100, 64)
+    return stream_argv(selftest_argv(None), 100, 64)
 
 
 @app.post("/transcode")

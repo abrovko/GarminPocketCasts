@@ -6,7 +6,8 @@ audio down already sped up.
 
 It is a single Python file. It pulls an episode from its podcast CDN, pipes it through
 ffmpeg's `atempo` filter, and streams the re-encoded MP3 back as the response body. Nothing is
-written to disk and nothing is kept between requests.
+kept between requests. `PC_BUFFER=1` sends a finished temp file instead of streaming — see
+*Streamed or buffered*.
 
 **It is optional.** With no proxy configured the app behaves exactly as it does without one,
 and if a configured proxy cannot be reached the sync retries the episode straight from its CDN
@@ -178,12 +179,16 @@ gcloud run deploy pc \
   --set-secrets PROXY_TOKEN=pocketcasts-proxy-token:latest
 ```
 
-Three flags are load-bearing:
+Four flags are load-bearing:
 
 - **`--timeout 3600`** — the request stays open for the whole download. The 300 s default cuts
   it off mid-episode.
 - **`--allow-unauthenticated`** — the watch cannot do Google OAuth, so Cloud Run IAM cannot
   gate it. The bearer token is the gate.
+- **`--memory 512Mi --concurrency 4` suits the default streamed mode**, where nothing is held in
+  memory. **If you set `PC_BUFFER=1`, raise them to `--memory 1Gi --concurrency 1`**: the
+  transcode then lands in `/tmp`, which is **tmpfs, i.e. RAM**, and `MAX_OUTPUT_BYTES` lets one
+  episode reach 200 MB. See *Streamed or buffered*.
 - **`--max-instances 2`** — a cost ceiling.
 
 `--no-cpu-throttling` is not needed: all the work happens inside a request handler, which is
@@ -263,13 +268,19 @@ ffprobe out.mp3      # duration = source duration / speed
 
 Expect:
 
-- `ttfb` of a second or two — most of it opening the source. A minute means ffmpeg is
-  buffering instead of streaming.
+- `ttfb` of a second or two in the default streamed mode — most of it opening the source. Under
+  `PC_BUFFER=1` it covers the whole transcode instead, about 30 s for a 15-40 minute episode;
+  **the watch abandons a download after 120 s with no bytes**, so a `ttfb` approaching that is
+  the warning sign. See *Streamed or buffered*.
+- No `Content-Length` when streamed; a real one, matching `size_download`, when buffered.
 - Output about a third of the source at 1.5× / 64k mono, with `ffprobe` reporting the source
   duration divided by the speed.
+- **An ID3v2 tag at the head**: `head -c 3 out.mp3` must be `ID3`. Without it the episode
+  downloads and plays but cannot be seeked — see *Why the output carries an ID3v2 tag*. The Xing
+  header (`head -c 2000 out.mp3 | grep -ac Info`) is present only when buffering, by design.
 - 401 on a bad token, 400 on a private address, 502 on a dead source.
-- No ffmpeg process left behind after `Ctrl-C` mid-download — the Cloud Run log line
-  `streamed N bytes` confirms the cleanup ran.
+- No ffmpeg process left behind after a `Ctrl-C` mid-download, and no temp file in `/tmp` if you
+  were buffering.
 
 ### 5. Point the watch at it
 
@@ -345,14 +356,85 @@ pip install -r requirements.txt
 PROXY_TOKEN=dev-token python main.py
 ```
 
+## Why the output carries an ID3v2 tag
+
+**Because without one the watch cannot seek inside the episode.** Every skip restarts the
+*audio* from the beginning while the progress ring advances normally and skipping to the end
+ends the episode — a failure with no error anywhere, which looks like a bug in the app and is
+not. `-id3v2_version 0` was set to save a few dozen bytes and cost five rounds of bisecting on
+hardware to find. **Do not set it back.**
+
+Bisected against a fēnix 9 Pro, 2026-09-08/09, one variable per round:
+
+| Round | ID3v2 | Xing frame | Audio frames | Seeks? |
+| --- | --- | --- | --- | --- |
+| Original build | none | none (`-write_xing 0`) | ours | no |
+| Buffered so ffmpeg could write a real Xing | none | ffmpeg's | ours | no |
+| Relay the CDN's bytes over this same POST | source's | source's | source's | **yes** |
+| `-c:a copy` — our container, source's frames | none | ffmpeg's | source's | no |
+| **`-id3v2_version 3`** | **ours** | ffmpeg's | ours | **yes** |
+
+What each round eliminated: the watch and the app (round 3 vs the app's own logs), the transport
+(round 3 — a POST from Cloud Run is fine), the Xing seek table (round 2), and the audio encoding
+itself (round 4 — mono, 64 kbps and `atempo` are all innocent, since the *same bytes* seek when
+relayed and do not when remuxed).
+
+The seek table was never the problem. Decoding the tags byte by byte, a working file and a
+failing one *both* carried a complete `Info` tag — `flags=0x0000000f`, so frames, bytes, TOC and
+quality all present, both TOCs populated and monotonic. The only structural difference left was
+the head of the file:
+
+```
+works: ID3v2 45 bytes (v2.4), first frame at 45, Info at 81, flags=0x0f, TOC ok
+fails: no ID3v2,              first frame at  0, Info at 36, flags=0x0f, TOC ok
+```
+
+v3 rather than v4, for the wider compatibility. ffmpeg fills it from the source's own metadata,
+so it costs a few dozen bytes and nothing in quality.
+
+## Streamed or buffered
+
+The response is **streamed by default** — ffmpeg's stdout goes straight down the wire — and
+`PC_BUFFER=1` switches to writing the transcode to a temp file and sending that when ffmpeg
+exits. The flag flips the running service in seconds without rebuilding the image:
+
+```powershell
+gcloud run services update pc --region $REGION --set-env-vars PC_BUFFER=1
+gcloud run services update pc --region $REGION --remove-env-vars PC_BUFFER
+```
+
+**Neither mode affects whether an episode can be seeked.** That is the ID3v2 tag, which both
+write. Buffering was built for the theory that the Xing header was the problem, and that theory
+was measured wrong — a buffered transcode with a complete Xing table and no ID3 tag did not seek.
+
+| | streamed (default) | buffered (`PC_BUFFER=1`) |
+| --- | --- | --- |
+| Time to first byte | a second or two — the source's own latency | the **whole transcode**, ~30 s for a 15–40 minute episode |
+| `Content-Length` | none; the watch's progress bar falls back to `Proxy.expectedBytes()` | real, so the bar is exact |
+| Xing seek table | none (`-write_xing 0`) | complete, with a populated TOC |
+| Memory | nothing held | the whole episode in `/tmp`, which is **RAM** on Cloud Run |
+| Deploy flags | `--memory 512Mi --concurrency 4` | `--memory 1Gi --concurrency 1` |
+
+**Why streamed is the default.** `GarminPocketCastsSyncDelegate` abandons a download after 120 s
+with nothing transferred (`STALL_MS`). Buffering puts the entire transcode inside that window, so
+a long enough episode fails as a stall — `MAX_OUTPUT_SECONDS` allows six hours, and a multi-hour
+episode plausibly exceeds it. Streaming keeps bytes moving from the start and is clear of that
+however long the episode.
+
+**Why you might buffer anyway.** A populated seek table is what an mp3 is supposed to carry, and
+the exact progress bar is nicer than an estimate. If a device ever turns up that needs the Xing
+table too, this is the switch.
+
+Every transcode line in the Cloud Run log names the mode:
+`transcode speed=200 bitrate=64 mono=True mode=streamed url=…`. The buffered path also logs
+`transcoded N bytes in N.Ns`, which is the number to watch against that 120 s.
+
 ## Implementation notes
 
-- **`-write_xing 0`.** A pipe is not seekable, so ffmpeg cannot return to fill in a Xing
-  header's frame count, and writing one leaves a header of zeros that reads as a zero-length
-  episode. Output is CBR, so decoders derive duration from bitrate and file size.
-- **The first chunk is read before the response is committed.** ffmpeg exits immediately on an
-  unusable source, after the handler has returned; without this the caller gets a 200 with an
-  empty body, which on the watch becomes a `ContentRef` for a zero-byte episode.
+- **The first chunk is read before the response is committed** (streamed), and ffmpeg runs to
+  completion before it (buffered). Either way a dead source becomes a 502 rather than a 200 with
+  an empty body — which on the watch is a `ContentRef` for a zero-byte episode, a download that
+  looks like it worked and is silently unplayable.
 - **Reconnect flags are passed only for http(s) inputs.** They belong to the protocol handler,
   not to ffmpeg globally, and any other input fails with `Option reconnect not found`. The
   two whitelists and `-max_redirects 0` sit in the same branch, for the same reason.
@@ -361,12 +443,18 @@ PROXY_TOKEN=dev-token python main.py
   `-max_redirects 0` safe. A probe that fails for its own reasons — a 403, a refused
   connection — is not fatal: the url is handed over as-is, already validated, and ffmpeg
   reports whatever it finds.
-- **stderr is drained on a thread.** If that pipe fills while nobody reads it, ffmpeg blocks
-  writing while the server blocks reading stdout, and the request hangs.
-- **ffmpeg is killed in a `finally`.** A client disconnect closes the generator; without the
-  reap, every severed download leaks a process.
-- **A failure after the first byte cannot be reported.** The response is committed at 200, so a
-  source that dies mid-stream reaches the watch as a truncated download.
+- **`sink_args()` is the only place the two modes differ**, so everything before it — the
+  whitelists, the ID3 tag, `atempo`, the bitrate — is shared and cannot drift between them.
+- **stderr is drained on a thread** (streamed). If that pipe fills while nobody reads it, ffmpeg
+  blocks writing while the server blocks reading stdout, and the request hangs.
+- **ffmpeg is killed in a `finally`, and the temp file deleted in one.** A client disconnect
+  closes the generator; without the reap every severed download leaks a process, and in buffered
+  mode a leaked file is leaked memory for the life of the instance.
+- **A failure after the first byte cannot be reported** (streamed). The response is committed at
+  200, so a source that dies mid-transfer reaches the watch as a truncated download.
+- **`MAX_TRANSCODE_SECONDS` reaps an abandoned request** (buffered). Nothing reaches the client
+  until ffmpeg exits, so a client that gave up is invisible until then; 300 s is well past the
+  point the watch has already given up.
 
 ## Security
 

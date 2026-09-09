@@ -11,3 +11,5 @@ logs/
 tests/api/.env
 tests/api/__pycache__/
 tests/api/.pytest_cache/
+
+proxy/__pycache__/

@@ -104,7 +104,19 @@ class GarminPocketCastsContentDelegate extends Media.ContentDelegate {
 
     // Playback events from the media player. A real provider would bank these
     // in Storage and report them back to the service on the next sync.
-    function onSong(contentRefId as Object, songEvent as SongEvent, playbackPosition as Number or PlaybackPosition) as Void {
+    //
+    // EVERY PARAMETER IS Object?, AND THE CLASS COMMENT ABOVE IS NOT ASPIRATIONAL.
+    // The declaration is a runtime assertion (rule 8), and the SDK's own types
+    // are narrower than what the player actually passes. Measured on a fenix 9
+    // Pro, 2026-09-08 20:07:32: `Error in onSong()` with the opening println
+    // MISSING from the device log, i.e. it died on the invocation rather than
+    // anywhere in the body - the same shape as rule 12. It landed seconds after
+    // startSync2() tore playback down, so the likeliest offender is a null
+    // contentRefId or position on the way out, which `Object` and `Number or
+    // PlaybackPosition` both refuse. Do not narrow these back to the SDK's
+    // signature; bankPosition() below is already written for Object?.
+    (:typecheck(false))
+    function onSong(contentRefId as Object?, songEvent as Object?, playbackPosition as Object?) as Void {
         // println is NOT stripped from release builds (verified - the strings are
         // present in the release .prg), so this lands in GARMIN/APPS/LOGS/GarminPocketCasts.TXT
         // on device as well as in the simulator console.

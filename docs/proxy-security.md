@@ -12,7 +12,7 @@ the ffmpeg docs did not catch, and a container caught both in a minute.
 
 Threat model worth stating up front: the proxy is a public, internet-facing Cloud Run service
 deployed `--allow-unauthenticated`, with a shared bearer token as the only authentication. It
-takes a caller-supplied URL, fetches it with ffmpeg and streams the result back.
+takes a caller-supplied URL, fetches it with ffmpeg and sends the result back.
 
 **The token is not the only barrier, and that is what makes finding 1 worth fixing.**
 `GarminPocketCastsSyncDelegate.fetch()` sends `track.url` to `/transcode`, and that value comes
@@ -156,7 +156,8 @@ Cloud Build step dies with `user 'proxy' already exists`, which is how the first
 change failed. `useradd -r` also warns that uid 10001 is above `SYS_UID_MAX`; that is a warning
 only and the build succeeds.
 
-Nothing is written to disk by design, so a read-only root filesystem is still an option on top;
+Nothing is written to disk unless `PC_BUFFER=1` is set, and then only one temp file per
+transcode under `/tmp`, so a read-only root filesystem is still an option on top;
 it was not taken, since gunicorn and pip's packages are read from root-owned paths and the
 value over an unprivileged user is small.
 

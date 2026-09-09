@@ -17,8 +17,9 @@ ENV PYTHONUNBUFFERED=1
 # ffmpeg parses wholly attacker-influenced media here - the episode comes from
 # a podcast feed, not from us - and is one of the larger memory-unsafe parsing
 # surfaces in common use. Cloud Run's gVisor sandbox is the real boundary;
-# this is defence in depth behind it. Nothing is written to disk by design, so
-# an unprivileged user costs nothing.
+# this is defence in depth behind it. Nothing is written to disk in the default
+# streamed mode, and PC_BUFFER=1 writes one temp file per transcode under /tmp,
+# which any uid can create - so an unprivileged user still costs nothing.
 #
 # NOT named "proxy": Debian ships one at uid 13, so useradd exits 9 and the
 # Cloud Build step fails with "user 'proxy' already exists".
