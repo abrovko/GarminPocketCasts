@@ -1185,6 +1185,13 @@ module Catalog {
         return getDirtyKeys().size() > 0 || getUpNextRemovals().size() > 0;
     }
 
+    // Whether a removal is still queued, i.e. the server has not confirmed it.
+    // The mirror of isDirty(), and read for the same reason - see
+    // PocketCastsClient.removeNext().
+    function hasUpNextRemoval(uuid as String) as Boolean {
+        return getUpNextRemovals().indexOf(uuid) >= 0;
+    }
+
     function clearUpNextRemoval(uuid as String) as Void {
         removeId(UPNEXT_RM_KEY, uuid);
     }

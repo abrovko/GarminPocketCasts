@@ -57,11 +57,18 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
     // build a menu every two seconds for as long as the app lived.
     static const MAX_RESCUE_ATTEMPTS = 3;
 
+    // How long to let a sync mode that never arrives keep this spinner. See
+    // onRescueTick(): on every measured launch getSyncDelegate() is called
+    // immediately after startSync2(), so 30 s is generous by a wide margin and
+    // still short enough to be an answer rather than a hang.
+    static const MAX_LAUNCH_TICKS = 15;
+
     private var _client as PocketCastsClient?;
     private var _timer as Timer.Timer?;
     private var _switchTimer as Timer.Timer?;
     private var _settled as Number = 0;
     private var _attempts as Number = 0;
+    private var _launchTicks as Number = 0;
     private var _message as String?;
     private var _finished as Boolean = false;
 
@@ -177,6 +184,42 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
         var switcher = new Timer.Timer();
         switcher.start(method(:onSwitchToMenu), SWITCH_DELAY_MS, false);
         _switchTimer = switcher;
+    }
+
+    // Give up on this refresh and leave no trace of it behind.
+    //
+    // Called when the user backs out of the spinner. Cancelling the requests is
+    // not enough on its own and neither is dropping the client - both were
+    // tried, and both leave a fetch running that nobody is waiting for:
+    //
+    //  - PocketCastsClient chains each request off the previous callback, so
+    //    the cancellation just arrives as a failure and the chain carries on to
+    //    the next endpoint. Hence client.abandon().
+    //  - the 45 s watchdog is still armed, and firing it calls finishOnce(),
+    //    which switches the view. Measured on a fenix 9 Pro
+    //    (logs/2026-09-20_175156, 12:51:07 back, 12:51:52 "refresh: switching
+    //    to menu") - the switch landed underneath a sync the user had started
+    //    in the 45 s in between.
+    function abandon() as Void {
+        _finished = true;
+
+        var timer = _timer;
+        _timer = null;
+        if (timer != null) {
+            timer.stop();
+        }
+
+        var switcher = _switchTimer;
+        _switchTimer = null;
+        if (switcher != null) {
+            switcher.stop();
+        }
+
+        var client = _client;
+        _client = null;
+        if (client != null) {
+            client.abandon();
+        }
     }
 
     // Where the refresh goes next. Named for what it used to do only; on the
@@ -317,6 +360,7 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
     private function armRescue() as Void {
         _settled = 0;
         _attempts = 0;
+        _launchTicks = 0;
         // Cancel before constructing, not after: two live timers for the sake
         // of tidiness is a third of the budget.
         Rescue.cancel();
@@ -326,18 +370,56 @@ class GarminPocketCastsRefreshView extends WatchUi.ProgressBar {
     }
 
     function onRescueTick() as Void {
-        // Still syncing. Whether a timer in this invocation runs at all while
-        // sync mode is up is not confirmed on hardware - if it does not, this
+        // Still syncing - or still waiting to find out whether the watch took
+        // the request at all. Whether a timer in this invocation runs while
+        // sync mode is up is not confirmed on hardware; if it does not, this
         // simply starts ticking when the app comes back, which is the moment
         // that matters. Either way nothing is judged until the sync delegate
         // has ended the session.
-        //
-        // The flag never clearing is the case where the watch silently drops
-        // startSync() and no sync mode ever comes up. That is left alone: it
-        // is a device-state fault with its own diagnosis, and the spinner is
-        // no worse off than before this timer existed.
         if (Catalog.isSyncFromMenu()) {
             _settled = 0;
+
+            // Sync mode came up, so however long this takes is a download
+            // running, not a hang. Nothing is judged until it ends.
+            if (SyncStarter.started()) {
+                return;
+            }
+
+            // It did not, and by now it is not going to. THIS SPINNER IS THE
+            // ONE SCREEN WITH NO WAY OUT: by the time begin() was called
+            // finishOnce() had stopped the watchdog, stopped the switch timer
+            // and dropped the client, and the flag below never clears because
+            // no sync delegate will ever clear it - so onRescueTick() used to
+            // early-return here forever and "Loading playlists" turned until
+            // the user pressed back or force-quit.
+            //
+            // Which is not rare. The watch drops startSync() whenever it has
+            // no usable Wi-Fi (see "Device-state false alarms"), and it does
+            // so silently - startSync2() returns, nothing else happens. Read
+            // off a fenix 9 Pro (logs/2026-09-20_175156, 12:54 to 12:58):
+            // seven consecutive "startSync2" lines, not one getSyncDelegate
+            // or onStartSync behind any of them, each one ended by the user
+            // backing out of the spinner by hand.
+            //
+            // So say so and go to the hub. The flag is cleared here rather
+            // than left set, because it is a claim that one of our views is
+            // underneath the system's sync screen and there is no sync screen:
+            // left true, a later sync the SYSTEM starts through isSyncNeeded()
+            // would inherit it and switch a view under a user who asked for
+            // nothing. The status goes with it, spent but not shown - the
+            // sync not starting at all is the more urgent claim on the one
+            // slot the hub has.
+            _launchTicks++;
+            if (_launchTicks < MAX_LAUNCH_TICKS) {
+                return;
+            }
+
+            System.println("refresh: sync mode never came up after "
+                + (MAX_LAUNCH_TICKS * RESCUE_TICK_MS / 1000) + "s, giving up");
+            Catalog.setSyncFromMenu(false);
+            SyncStarter.takeStatus();
+            Rescue.cancel();
+            Nav.hubStatus("Sync did not start", WatchUi.SLIDE_RIGHT);
             return;
         }
 
@@ -421,8 +503,14 @@ module Rescue {
 // been launched off the back of it. See onBack().
 class GarminPocketCastsRefreshDelegate extends WatchUi.BehaviorDelegate {
 
-    function initialize() {
+    // The spinner this delegate answers for, so onBack() can shut it down
+    // rather than only cancelling its requests. One-way: the view knows
+    // nothing about the delegate, so this is not a reference cycle.
+    private var _view as GarminPocketCastsRefreshView;
+
+    function initialize(view as GarminPocketCastsRefreshView) {
         BehaviorDelegate.initialize();
+        _view = view;
     }
 
     // Switched to, not popped: every config view is switched IN rather than
@@ -452,8 +540,20 @@ class GarminPocketCastsRefreshDelegate extends WatchUi.BehaviorDelegate {
 
         if (SyncStarter.launched()) {
             System.println("refresh: back during sync launch, leaving it running");
+            // Nothing to abandon - the fetch finished before begin() was
+            // reached, so finishOnce() has already stopped both timers and
+            // dropped the client. The sync is the thing still running and it
+            // is not ours to stop.
         } else {
             System.println("refresh: cancelled by user");
+            // BEFORE the cancel, not after. Both halves are needed - the
+            // cancel kills the request in flight, this stops the client
+            // issuing the next one and stops the watchdog switching a view
+            // 45 s from now (see abandon()) - but cancelAllRequests() delivers
+            // the cancellation to the callback SYNCHRONOUSLY, measured in the
+            // sync delegate, so a client still armed when it runs chains one
+            // more request out before anything can stop it.
+            _view.abandon();
             Communications.cancelAllRequests();
         }
         Nav.hub(WatchUi.SLIDE_RIGHT);

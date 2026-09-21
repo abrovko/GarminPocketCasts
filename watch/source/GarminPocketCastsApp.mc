@@ -101,6 +101,13 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
 
     // Get a delegate that communicates sync status to the system for syncing media content to the device
     function getSyncDelegate() as Communications.SyncDelegate? {
+        // The system has accepted a sync and is bringing sync mode up. This is
+        // the earliest evidence of that, and the only evidence there is - see
+        // SyncStarter.started(), and the refresh spinner's rescue timer, which
+        // has no other way to tell a sync that is starting from one the watch
+        // threw away.
+        SyncStarter.noteStarted();
+
         // Safe here: getSyncDelegate() is called BEFORE onStartSync(), so no
         // download is in flight and no ref id is waiting to be written.
         Catalog.reclaimIdleAudio();
@@ -151,7 +158,7 @@ class GarminPocketCastsApp extends Application.AudioContentProviderApp {
     function getSyncConfigurationView() as [Views] or [Views, InputDelegates] {
         Catalog.reclaimIdleAudio();
         var view = new GarminPocketCastsRefreshView(false);
-        return [ view, new GarminPocketCastsRefreshDelegate() ];
+        return [ view, new GarminPocketCastsRefreshDelegate(view) ];
     }
 
 }

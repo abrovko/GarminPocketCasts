@@ -146,10 +146,32 @@ class PocketCastsClient {
     // here: a failed /user/playlist/list abandons the whole refresh.
     private var _staleLists as Array<String> = [] as Array<String>;
 
+    // Whether the caller has walked away from this fetch. See abandon().
+    private var _abandoned as Boolean = false;
+
     // onDone is called exactly once, with (true, null) on success or
     // (false, "reason") on failure.
     function initialize(onDone as Method(success as Boolean, message as String?) as Void) {
         _onDone = onDone;
+    }
+
+    // Stop where we are and never call back.
+    //
+    // Communications.cancelAllRequests() is NOT enough on its own, and that is
+    // the whole reason this exists. It kills the request in flight, which
+    // arrives as a failure in the callback - and every callback here chains on
+    // to the next request. Read off a fenix 9 Pro (logs/2026-09-20_175156,
+    // 12:51:07): the user backed out of the spinner, "refresh: cancelled by
+    // user" cancelled /up_next/sync, and the client went straight on to
+    // /user/playlist/list and then /user/in_progress, finally committing a
+    // catalog with both playlists carried forward stale nearly three minutes
+    // later - underneath a sync the user had started in the meantime.
+    //
+    // A flag rather than dropping _onDone, because "done" and "abandoned" are
+    // different claims and every callback has to be able to tell them apart.
+    function abandon() as Void {
+        _abandoned = true;
+        _onDone = null;
     }
 
     // Entry point: refresh Catalog's playlists. Up Next is fetched first so it
@@ -213,6 +235,7 @@ class PocketCastsClient {
         responseCode as Number,
         data as Dictionary or String or Toybox.PersistedContent.Iterator or Null
     ) as Void {
+        if (_abandoned) { return; }
         var episodes = null;
         if (responseCode == 200 && data instanceof Dictionary) {
             episodes = data.get("episodes");
@@ -270,6 +293,7 @@ class PocketCastsClient {
         responseCode as Number,
         data as Dictionary or String or Toybox.PersistedContent.Iterator or Null
     ) as Void {
+        if (_abandoned) { return; }
         if (responseCode == 200 && data instanceof Dictionary) {
             var token = data.get("token");
             if (token instanceof String) {
@@ -333,6 +357,7 @@ class PocketCastsClient {
         responseCode as Number,
         data as Dictionary or String or Toybox.PersistedContent.Iterator or Null
     ) as Void {
+        if (_abandoned) { return; }
         // A stored token outlives its server-side session. Throw it away and
         // log in again, but only once - a login that keeps coming back 401
         // would otherwise loop until the watch gave up.
@@ -579,6 +604,7 @@ class PocketCastsClient {
         responseCode as Number,
         data as Dictionary or String or Toybox.PersistedContent.Iterator or Null
     ) as Void {
+        if (_abandoned) { return; }
         if (responseCode == 200 && data instanceof Dictionary) {
             var episodes = data.get("episodes");
 
@@ -804,6 +830,32 @@ class PocketCastsClient {
         }
 
         var uuid = _dirty[0];
+
+        // Another client in this process has already reported this one and had
+        // it confirmed. TWO CLIENTS CAN BE DRAINING THE SAME OUTBOX AT ONCE:
+        // the playback delegate's opportunistic flush and a refresh started
+        // from the menu are separate invocations of the same process, both
+        // snapshot _dirty from Storage, and nothing serialises them.
+        //
+        // Skipping is not tidiness, it is the fix for a silent corruption.
+        // onPushed() clears the played flag together with the outbox entry, so
+        // the SECOND client to reach a finished episode found isPlayed() false
+        // and sent the stored position instead - which for a finished episode
+        // is 0 - telling the server the episode was back at the start and
+        // resetting it to unplayed on every device. Read off a fenix 9 Pro
+        // (logs/2026-09-20_175156, .BAK at 17:46): "update_episode d9904c7c
+        // status=played" from one client, then "update_episode d9904c7c pos=0
+        // status=playing" from the other, seconds apart.
+        //
+        // An entry is cleared only on a confirmed 200, so "no longer dirty"
+        // can only mean the server already has it.
+        if (!Catalog.isDirty(uuid)) {
+            System.println("pc: " + uuid.substring(0, 8) + " already reported, skipping");
+            _dirty = _dirty.slice(1, null);
+            pushNext();
+            return;
+        }
+
         var podcast = Catalog.getPodcastFor(uuid);
         if (podcast.length() == 0) {
             // Nothing to report it against - a record written before the
@@ -871,6 +923,7 @@ class PocketCastsClient {
         responseCode as Number,
         data as Dictionary or String or Toybox.PersistedContent.Iterator or Null
     ) as Void {
+        if (_abandoned) { return; }
         if (_dirty.size() == 0) {
             return;
         }
@@ -912,6 +965,18 @@ class PocketCastsClient {
         }
 
         var uuid = _removals[0];
+
+        // Same race as pushNext()'s, same reason. Harmless here rather than
+        // corrupting - removing an episode twice removes it once - but it is a
+        // write against an account this app does not own, and the duplicate
+        // pairs are in the same log.
+        if (!Catalog.hasUpNextRemoval(uuid)) {
+            System.println("pc: " + uuid.substring(0, 8) + " already removed, skipping");
+            _removals = _removals.slice(1, null);
+            removeNext();
+            return;
+        }
+
         System.println("pc: up_next remove " + uuid);
 
         // serverModified 0 and modified 0, both measured rather than assumed.
@@ -961,6 +1026,7 @@ class PocketCastsClient {
         responseCode as Number,
         data as Dictionary or String or Toybox.PersistedContent.Iterator or Null
     ) as Void {
+        if (_abandoned) { return; }
         if (_removals.size() == 0) {
             return;
         }
@@ -1027,6 +1093,7 @@ class PocketCastsClient {
         responseCode as Number,
         data as Dictionary or String or Toybox.PersistedContent.Iterator or Null
     ) as Void {
+        if (_abandoned) { return; }
         if (_podcastQueue.size() == 0) {
             return;
         }

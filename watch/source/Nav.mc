@@ -113,11 +113,11 @@ module Nav {
     // hub's "Get new episodes" a single tap: true goes straight on into the
     // sync, false stops at the picker because the picker IS the destination.
     function refresh(autoSync as Boolean, transition as WatchUi.SlideType) as Void {
-        WatchUi.switchToView(
-            new GarminPocketCastsRefreshView(autoSync),
-            new GarminPocketCastsRefreshDelegate(),
-            transition
-        );
+        // The delegate is handed the view here because backing out of a
+        // spinner has to shut the fetch down, not merely cancel the request in
+        // flight - see GarminPocketCastsRefreshView.abandon().
+        var view = new GarminPocketCastsRefreshView(autoSync);
+        WatchUi.switchToView(view, new GarminPocketCastsRefreshDelegate(view), transition);
     }
 
     // The playlist picker. status is why the refresh that led here failed, or

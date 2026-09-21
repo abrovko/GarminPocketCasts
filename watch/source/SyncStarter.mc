@@ -56,6 +56,29 @@ module SyncStarter {
         return status;
     }
 
+    // Whether the sync begin() asked for has actually come up.
+    //
+    // startSync2() returns nothing and there is no callback on it, so a sync
+    // the watch silently drops - see "Device-state false alarms", typically no
+    // usable Wi-Fi - is indistinguishable from one that is merely taking a
+    // moment. This is the difference: noteStarted() is called from
+    // getSyncDelegate(), which the system calls as soon as it accepts the
+    // request. On every measured launch that is IMMEDIATE - in the device logs
+    // the getSyncDelegate line is the next one after startSync2, with nothing
+    // between - so a launch still unanswered seconds later was dropped.
+    //
+    // In memory only, like everything else here: a claim about what THIS
+    // process asked for and whether it happened.
+    var _started as Boolean = false;
+
+    function noteStarted() as Void {
+        _started = true;
+    }
+
+    function started() as Boolean {
+        return _started;
+    }
+
     // Called when a refresh starts, so that neither field can outlive the
     // refresh it describes.
     //
@@ -71,6 +94,7 @@ module SyncStarter {
     function clearForRefresh() as Void {
         _launched = false;
         _status = null;
+        _started = false;
     }
 
     // Start sync mode, with something other than the app name on the system's
@@ -104,6 +128,9 @@ module SyncStarter {
         Catalog.setSyncFromMenu(true);
         _launched = true;
         _status = status;
+        // Assigned by every begin(), never conditionally, for the same reason
+        // as _status: it must describe THIS launch and no earlier one.
+        _started = false;
 
         if (Communications has :startSync2) {
             var message = syncMessage();
