@@ -662,9 +662,9 @@ class PocketCastsClient {
                     // missing playedUpTo, or a field under another name.
                     if (i < MAX_IN_PROGRESS_LOG) {
                         System.println("pc: ip[" + i + "] " + uuid.substring(0, 8) +
-                            " pos=" + entry.get("playedUpTo") +
-                            " dur=" + entry.get("duration") +
-                            " status=" + entry.get("playingStatus") +
+                            " pos=" + (entry.get("playedUpTo") as Object?) +
+                            " dur=" + (entry.get("duration") as Object?) +
+                            " status=" + (entry.get("playingStatus") as Object?) +
                             " held=" + _seenEpisodes.hasKey(uuid));
                     }
 
@@ -1117,9 +1117,9 @@ class PocketCastsClient {
             // endpoint nests it under "podcast", its sibling /mobile/podcast/full
             // has been seen with it at the top level, and neither is worth a
             // device cycle to pin down for something this optional.
-            takeEpisodeDuration(data.get("episodes"));
+            takeEpisodeDuration(data.get("episodes") as Object?);
             if (podcast instanceof Dictionary) {
-                takeEpisodeDuration(podcast.get("episodes"));
+                takeEpisodeDuration(podcast.get("episodes") as Object?);
             }
         } else {
             System.println("pc: findbyepisode failed " + responseCode);
