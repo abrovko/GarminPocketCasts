@@ -8,7 +8,7 @@ Unaffiliated with Pocket Casts / Automattic. It talks to the same unofficial web
 the Pocket Casts web app uses, which can change without notice.
 
 - **App type:** `audio-content-provider-app`, `minApiLevel 5.0.0`
-- **Targets:** 57 products declared in `watch/manifest.xml`; developed and tested on **fēnix 7X**
+- **Targets:** 61 products declared in `watch/manifest.xml`; developed and tested on **fēnix 7X**
   and **fēnix 8 (47/51 mm)**
 
 ## Features
@@ -158,7 +158,7 @@ separate deliverable that the app does not need in order to build, run or work.
 
 ## Requirements
 
-- [Connect IQ SDK](https://developer.garmin.com/connect-iq/sdk/) 9.x (developed against 9.2.0)
+- [Connect IQ SDK](https://developer.garmin.com/connect-iq/sdk/) 9.3.0 or newer (its stricter type checker is what the code is written against)
 - A Connect IQ **developer key** — `monkeyc` cannot build without one
 - Windows + PowerShell for the deploy script (the build itself is platform-independent)
 - Optional: VS Code with the official **Monkey C** extension

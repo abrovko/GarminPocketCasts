@@ -26,6 +26,7 @@ vivoactive5.resourcePath = $(vivoactive5.resourcePath);resources-icon56
 
 # 60x60
 approachs7042mm.resourcePath = $(approachs7042mm.resourcePath);resources-icon60
+approachs7243mm.resourcePath = $(approachs7243mm.resourcePath);resources-icon60
 d2mach1.resourcePath = $(d2mach1.resourcePath);resources-icon60
 descentmk343mm.resourcePath = $(descentmk343mm.resourcePath);resources-icon60
 descentmk351mm.resourcePath = $(descentmk351mm.resourcePath);resources-icon60
@@ -46,6 +47,7 @@ marq2aviator.resourcePath = $(marq2aviator.resourcePath);resources-icon60
 venu2s.resourcePath = $(venu2s.resourcePath);resources-icon61
 
 # 65x65
+approachs7247mm.resourcePath = $(approachs7247mm.resourcePath);resources-icon65
 d2mach2.resourcePath = $(d2mach2.resourcePath);resources-icon65
 d2mach2pro.resourcePath = $(d2mach2pro.resourcePath);resources-icon65
 fenix847mm.resourcePath = $(fenix847mm.resourcePath);resources-icon65
@@ -56,6 +58,7 @@ fenix9pro51mm.resourcePath = $(fenix9pro51mm.resourcePath);resources-icon65
 fr57047mm.resourcePath = $(fr57047mm.resourcePath);resources-icon65
 fr965.resourcePath = $(fr965.resourcePath);resources-icon65
 fr970.resourcePath = $(fr970.resourcePath);resources-icon65
+marq3.resourcePath = $(marq3.resourcePath);resources-icon65
 venu445mm.resourcePath = $(venu445mm.resourcePath);resources-icon65
 venux1.resourcePath = $(venux1.resourcePath);resources-icon65
 
@@ -69,6 +72,7 @@ venu3s.resourcePath = $(venu3s.resourcePath);resources-icon70
 
 # 40x40 devices use the base resources/ path unchanged:
 #   enduro3
+#   enduro4
 #   fenix7
 #   fenix7pro
 #   fenix7s

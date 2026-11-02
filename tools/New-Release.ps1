@@ -186,7 +186,7 @@ function Get-CompilerJsonPath ($id) {
 # A product id is not a watch. `fenix847mm` is the part number for a fēnix 8
 # 51mm and a tactix 8 and a quatix 8, and nobody browsing a release page knows
 # that - so the human names come from the SDK's own compiler.json, which is
-# the same file that is authoritative about app types and memory limits. All 57
+# the same file that is authoritative about app types and memory limits. All 61
 # products in this manifest carry a displayName; the fallback is the id, which
 # is at least what the file is called.
 $script:DisplayNames = @{}
@@ -569,7 +569,7 @@ Write-Step 'Packaging'
 
 # One archive per device, each labelled with the watch it is for. Still one
 # asset per watch and no all-devices bundle: sideloading is one download onto
-# one watch, so an archive of all 57 would be megabytes to fetch and a folder to
+# one watch, so an archive of all 61 would be megabytes to fetch and a folder to
 # search for a name you would have to know already.
 $assets = @($devices | ForEach-Object { $_.File })
 
