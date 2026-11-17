@@ -160,7 +160,8 @@ separate deliverable that the app does not need in order to build, run or work.
 
 - [Connect IQ SDK](https://developer.garmin.com/connect-iq/sdk/) 9.3.0 or newer (its stricter type checker is what the code is written against)
 - A Connect IQ **developer key** — `monkeyc` cannot build without one
-- Windows + PowerShell for the deploy script (the build itself is platform-independent)
+- Windows + PowerShell for the deploy script (the build itself is platform-independent);
+  on macOS, see [docs/macos.md](docs/macos.md) for building and deploying from the terminal
 - Optional: VS Code with the official **Monkey C** extension
 
 ## Build
