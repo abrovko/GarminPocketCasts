@@ -148,7 +148,7 @@ chosen speed (1.0×, 1.25×, 1.5×, 1.75× or 2.0×) and quality (64k/96k mono o
 ```
 watch/      the Connect IQ app — manifest, jungle, Monkey C source, resources
 proxy/      optional self-hosted transcoding service (Python, Cloud Run)
-tools/      build, deploy and release automation (PowerShell)
+tools/      build, deploy and release automation (PowerShell + bash)
 tests/api/  contract tests against the Pocket Casts API — not tests of the app
 docs/       design and security notes, plus the README screenshots
 ```
@@ -160,7 +160,11 @@ separate deliverable that the app does not need in order to build, run or work.
 
 - [Connect IQ SDK](https://developer.garmin.com/connect-iq/sdk/) 9.3.0 or newer (its stricter type checker is what the code is written against)
 - A Connect IQ **developer key** — `monkeyc` cannot build without one
-- Windows + PowerShell for the deploy script (the build itself is platform-independent)
+- Device packs for **every** product in `watch/manifest.xml` (SDK Manager → Devices, or
+  `connect-iq-sdk-manager device download --manifest=watch/manifest.xml` after login). The
+  jungle names those products for icon overrides, so a partial pack set fails the compile.
+- Windows + PowerShell, or Linux with `gvfs` / `gio`, for the deploy scripts (the build itself
+  is platform-independent)
 - Optional: VS Code with the official **Monkey C** extension
 
 ## Build
@@ -169,8 +173,15 @@ The SDK path is recorded by the SDK manager in `current-sdk.cfg` — read it rat
 hardcoding a version:
 
 ```powershell
+# Windows
 $SDK = (Get-Content "$env:APPDATA\Garmin\ConnectIQ\current-sdk.cfg" -Raw).Trim() + "bin"
 $KEY = $env:GARMIN_DEVELOPER_KEY     # or the path to your key, wherever it lives
+```
+
+```bash
+# Linux
+SDK="$(tr -d '\r\n' < "$HOME/.Garmin/ConnectIQ/current-sdk.cfg")/bin"
+KEY="${GARMIN_DEVELOPER_KEY:-$HOME/.Garmin/ConnectIQ/developer_key}"
 ```
 
 The Connect IQ project lives in `watch/`, so that is where the jungle is and where the build
@@ -178,7 +189,7 @@ output lands. Paths inside a jungle resolve against the jungle file, so these ru
 repository root:
 
 ```powershell
-# Debug build — simulator only
+# Windows — Debug build (simulator only)
 & "$SDK\monkeyc.bat" -o watch\bin\GarminPocketCasts.prg -f watch\monkey.jungle -y $KEY -d fenix7x -w -l 3
 
 # Release build — required for real hardware
@@ -189,16 +200,23 @@ repository root:
 & "$SDK\monkeyc.bat" -e -o watch\bin\GarminPocketCasts.iq -f watch\monkey.jungle -y $KEY -w -l 3
 ```
 
+```bash
+# Linux — same flags; $SDK/monkeyc instead of monkeyc.bat, forward slashes fine
+"$SDK/monkeyc" -o watch/bin/GarminPocketCasts.prg -f watch/monkey.jungle -y "$KEY" -d fenix7x -w -l 3
+"$SDK/monkeyc" -o watch/bin/release/GarminPocketCasts.prg -f watch/monkey.jungle -y "$KEY" -d fenix7x -r -w -l 3
+"$SDK/monkeyc" -e -o watch/bin/GarminPocketCasts.iq -f watch/monkey.jungle -y "$KEY" -w -l 3
+```
+
 Opening the repository root in VS Code will **not** find the project: the Monkey C extension
 looks for `monkey.jungle` in the folder you opened. Open `watch/` instead — the palette
 commands (*Edit Products*, *Edit Application*) look for `manifest.xml` the same way.
 
-**Building by hand leaves the build stamp alone.** `tools\Deploy-Watch.ps1` rewrites
-`watch/source/BuildInfo.mc` with a `yyMMdd-HHmmss` stamp immediately before every release build, so
-the *Build* row in the app's Settings menu names the binary you are running. A plain `monkeyc`
-does not, so a hand-built `.prg` keeps whatever `STAMP` currently says. If you are going to
-sideload it, edit that constant first — the stamp is the only way to tell which binary the
-watch is actually running:
+**Building by hand leaves the build stamp alone.** `tools\Deploy-Watch.ps1` and
+`tools/deploy-watch.sh` rewrite `watch/source/BuildInfo.mc` with a `yyMMdd-HHmmss` stamp
+immediately before every release build, so the *Build* row in the app's Settings menu names
+the binary you are running. A plain `monkeyc` does not, so a hand-built `.prg` keeps whatever
+`STAMP` currently says. If you are going to sideload it, edit that constant first — the stamp
+is the only way to tell which binary the watch is actually running:
 
 ```monkeyc
 module BuildInfo {
@@ -211,9 +229,14 @@ module BuildInfo {
 
 ### With the script
 
-`tools\Deploy-Watch.ps1` does the entire round trip over MTP: stamp the build, build
-release, pull the previous run's logs into `logs\<timestamp>\`, clear them on the device,
-copy the `.prg` to `GARMIN/APPS/` and the `.prg.debug.xml` to `GARMIN/Debug/`.
+`tools\Deploy-Watch.ps1` (Windows) and `tools/deploy-watch.sh` (Linux, needs `gvfs` /
+`gio`) do the same round trip over MTP: stamp the build, build release, pull the previous
+run's logs into `logs\<timestamp>\`, clear them on the device, copy the `.prg` to
+`GARMIN/APPS/` (or `Apps`) and the `.prg.debug.xml` to `GARMIN/Debug/`.
+
+On Linux, wait until the watch is in MTP / file-transfer mode — `lsusb` should show a product
+id other than `091e:0003`, and the device should appear under `/run/user/$UID/gvfs/` after you
+open it once in the file manager.
 
 ```powershell
 .\tools\Deploy-Watch.ps1                       # build + deploy + rotate logs
@@ -223,12 +246,24 @@ copy the `.prg` to `GARMIN/APPS/` and the `.prg.debug.xml` to `GARMIN/Debug/`.
 .\tools\Deploy-Watch.ps1 -KeepLogs             # leave the device logs alone
 ```
 
-The script finds your developer key from `-DeveloperKey <path>`, else the
-`GARMIN_DEVELOPER_KEY` environment variable, else `%APPDATA%\Garmin\ConnectIQ\developer_key`.
-Setting it once is the least friction:
+```bash
+./tools/deploy-watch.sh --target fenix7x
+./tools/deploy-watch.sh --target fenix847mm --no-build
+./tools/deploy-watch.sh --pull-only
+./tools/deploy-watch.sh --pull-only --keep-logs
+```
+
+The scripts find your developer key from `-DeveloperKey` / `--developer-key`, else the
+`GARMIN_DEVELOPER_KEY` environment variable, else
+`%APPDATA%\Garmin\ConnectIQ\developer_key` (Windows) or `~/.Garmin/ConnectIQ/developer_key`
+(Linux). Setting it once is the least friction:
 
 ```powershell
 setx GARMIN_DEVELOPER_KEY C:\path\to\developer_key
+```
+
+```bash
+export GARMIN_DEVELOPER_KEY="$HOME/.Garmin/ConnectIQ/developer_key"
 ```
 
 ### Check the build stamp before restarting anything
@@ -248,17 +283,19 @@ into the binary that is running. The deploy script prints the same stamp when it
 
 ### By hand
 
-Everything the script does can be done in Explorer. The watch exposes **no mass-storage
-volume** — it mounts as an MTP device, so `Copy-Item`, `robocopy` and friends cannot see it
-and you drag files in Explorer instead (that is also why the script drives the Windows Shell
-COM namespace rather than the filesystem).
+Everything the script does can be done in Explorer (or your file manager on Linux). The watch
+exposes **no mass-storage volume** — it mounts as an MTP device, so `Copy-Item`, `robocopy`
+and friends cannot see it and you drag files in Explorer instead (that is also why the
+Windows script drives the Shell COM namespace rather than the filesystem; on Linux the shell
+script uses `gio` against the gvfs MTP mount).
 
 1. **Build the release `.prg`** with the release command above. The debug build may not
    start on hardware.
 2. **Set a build stamp** in `watch/source/BuildInfo.mc` before that build if you want to be able to
    tell this binary from the last one (see above).
 3. **Plug the watch in** over USB and open it in Explorer — *This PC → \<your watch\> →
-   Internal Storage → GARMIN*.
+   Internal Storage → GARMIN* (on Linux: open the watch in the file manager → *Internal
+   Storage → GARMIN*).
 4. **Copy `watch\bin\release\GarminPocketCasts.prg` into `GARMIN\APPS\`**, overwriting any earlier
    copy.
 5. **Copy `watch\bin\release\GarminPocketCasts.prg.debug.xml` into `GARMIN\Debug\`** (create the
@@ -287,7 +324,8 @@ COM namespace rather than the filesystem).
 Copy them off in Explorer to read them. **Delete the log between test runs** — it appends, and
 stale entries are easy to mistake for the current run; then put the empty
 `GarminPocketCasts.TXT` stub back, or the next run logs nothing. Logs rotate to `.BAK` at 5 KB.
-`.\tools\Deploy-Watch.ps1 -PullOnly` does the pull, the delete and the stub in one go.
+`.\tools\Deploy-Watch.ps1 -PullOnly` / `./tools/deploy-watch.sh --pull-only` does the pull,
+the delete and the stub in one go.
 
 ## License
 
