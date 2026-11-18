@@ -164,7 +164,8 @@ separate deliverable that the app does not need in order to build, run or work.
   `connect-iq-sdk-manager device download --manifest=watch/manifest.xml` after login). The
   jungle names those products for icon overrides, so a partial pack set fails the compile.
 - Windows + PowerShell, or Linux with `gvfs` / `gio`, for the deploy scripts (the build itself
-  is platform-independent)
+  is platform-independent); on macOS, see [docs/macos.md](docs/macos.md) for building and
+  deploying from the terminal
 - Optional: VS Code with the official **Monkey C** extension
 
 ## Build
